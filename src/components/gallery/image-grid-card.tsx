@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import Image from "next/image";
 
 import { formatBytes, formatDimensions } from "@/lib/utils/format";
@@ -16,7 +17,7 @@ type ImageGridCardProps = {
   onToggleFavorite: (imageId: string, nextValue: boolean) => Promise<void>;
 };
 
-export function ImageGridCard({
+function ImageGridCardComponent({
   image,
   index,
   isSelectionMode,
@@ -26,6 +27,7 @@ export function ImageGridCard({
   onToggleSelect,
   onToggleFavorite,
 }: ImageGridCardProps) {
+  const imageUrl = image.thumbnail_url ?? image.signed_url;
   const handlePrimaryAction = () => {
     if (pending) {
       return;
@@ -58,14 +60,16 @@ export function ImageGridCard({
         }
       }}
     >
-      <div className="relative aspect-[6/5] bg-slate-100">
-        {image.signed_url ? (
+      <div className="relative aspect-[5/4] bg-slate-100">
+        {imageUrl ? (
           <Image
-            src={image.signed_url}
+            src={imageUrl}
             alt={image.file_name}
             fill
-            sizes="(max-width: 768px) 50vw, (max-width: 1024px) 33vw, (max-width: 1536px) 25vw, 20vw"
+            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
             className="object-cover"
+            priority={index < 4}
+            loading={index < 4 ? "eager" : "lazy"}
             unoptimized
           />
         ) : (
@@ -119,7 +123,7 @@ export function ImageGridCard({
         </button>
       </div>
 
-      <div className="space-y-0.5 px-2 py-2">
+      <div className="space-y-0.5 px-2 py-1.5">
         <p className="truncate text-[12px] font-medium text-slate-900">{image.file_name}</p>
         <p className="text-[10px] text-slate-500">
           {formatDimensions(image.width, image.height)} ・ {formatBytes(image.size_bytes)}
@@ -128,3 +132,13 @@ export function ImageGridCard({
     </article>
   );
 }
+
+export const ImageGridCard = memo(
+  ImageGridCardComponent,
+  (previousProps, nextProps) =>
+    previousProps.image === nextProps.image &&
+    previousProps.index === nextProps.index &&
+    previousProps.isSelectionMode === nextProps.isSelectionMode &&
+    previousProps.selected === nextProps.selected &&
+    previousProps.pending === nextProps.pending,
+);

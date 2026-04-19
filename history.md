@@ -34,3 +34,12 @@
 - グリッド一覧をさらに小さく調整した。desktop の列数を増やし、カード下部の情報余白とサムネイル比率を詰めた。
 - 全画面ビューアの閉じるボタン不具合を修正した。close ボタンと下部情報バーに `z-index` を付け、画像レイヤーを `pointer-events-none` にして `onClose` を確実に受け取れるようにした。
 - 最終確認として保守性の見直しを行った。folder touch の二重更新を解消し、Storage+DB 削除処理を mutation 層へ統合し、一覧選択判定を `Set` 化し、toast タイマーの後始末を追加した。
+- 2026-04-19: gallery 一覧をページネーション対応。`page` クエリを追加し、scope / folder の切り替え時は `page=1` に戻して 32 件ずつ取得するように変更。
+- 2026-04-19: グリッド表示を desktop 4 列基準へ調整し、サムネイル高さとカード下部余白を少し詰めた。
+- 2026-04-19: 一覧下部に前へ / 次へボタンと現在ページ表示を追加。ページ切り替え後も current page の配列だけを viewer に渡す構造を維持。
+- 2026-04-19: gallery 一覧表示の体感速度を改善。server 側で一覧用の軽量サムネイル signed URL を別生成し、一覧カードでは元画像ではなくサムネイルを使うように変更。
+- 2026-04-19: `ImageGridCard` と `ImageListRow` を `React.memo` 化し、選択状態やお気に入り変更時に未変更カードが再描画されにくいように調整。
+- 2026-04-19: next/image の `sizes` と `priority` / `loading` を一覧向けに見直し、1画面目だけ eager、それ以外は lazy 読み込みに変更。
+- 2026-04-19: `src/lib/gallery/mutations.ts` を整理し、画像更新系の重複した Supabase update ロジックを `updateImages` helper に集約。
+- 2026-04-19: `src/lib/gallery/queries.ts` の画像一覧 query を fresh builder 生成に変更。page 補正時の再取得で builder を使い回さず、将来のライブラリ更新でも壊れにくい形に修正。
+- 2026-04-19: `GalleryShell` の一覧カード handler を `useCallback` と ref ベースに調整し、`React.memo` と stale callback がぶつかる長期運用リスクを解消。

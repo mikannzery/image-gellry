@@ -1,6 +1,7 @@
 import type { FolderRow } from "@/types/folder";
 
 export const GALLERY_BUCKET_NAME = "gallery-images";
+export const GALLERY_PAGE_SIZE = 32;
 export const GALLERY_SCOPE_TYPES = ["all", "uncategorized", "favorites", "folder"] as const;
 export const GALLERY_VIEW_MODES = ["grid", "list"] as const;
 export const GALLERY_SORT_ORDERS = ["newest", "oldest"] as const;
@@ -18,6 +19,16 @@ export type GalleryFilters = {
   scope: GalleryScope;
   view: GalleryViewMode;
   sort: GallerySortOrder;
+  page: number;
+};
+
+export type GalleryPagination = {
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+  hasPreviousPage: boolean;
+  hasNextPage: boolean;
 };
 
 export type UploadImageInput = {

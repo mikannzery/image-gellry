@@ -1,10 +1,11 @@
 "use client";
 
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import { ImageGrid } from "@/components/gallery/image-grid";
 import { ImageList } from "@/components/gallery/image-list";
+import { GalleryPaginationControls } from "@/components/gallery/gallery-pagination-controls";
 import { SelectionToolbar } from "@/components/gallery/selection-toolbar";
 import { CreateFolderModal } from "@/components/folders/create-folder-modal";
 import { EditFolderModal } from "@/components/folders/edit-folder-modal";
@@ -35,6 +36,7 @@ import { createClientSupabaseClient } from "@/lib/supabase/client";
 import {
   getGalleryTitle,
   type GalleryFilters,
+  type GalleryPagination,
   type GalleryScope,
   type GallerySortOrder,
   type GalleryViewMode,
@@ -47,6 +49,7 @@ type GalleryShellProps = {
   userEmail: string;
   folders: FolderRow[];
   images: GalleryImageItem[];
+  pagination: GalleryPagination;
   initialFilters: GalleryFilters;
 };
 
@@ -123,6 +126,7 @@ export function GalleryShell({
   userEmail,
   folders,
   images,
+  pagination,
   initialFilters,
 }: GalleryShellProps) {
   const router = useRouter();
@@ -151,10 +155,13 @@ export function GalleryShell({
   const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
   const [selectionMoveTargetFolderId, setSelectionMoveTargetFolderId] = useState("");
   const [isBulkDeleteConfirmOpen, setIsBulkDeleteConfirmOpen] = useState(false);
+  const galleryImagesRef = useRef<GalleryImageItem[]>(images);
 
   const currentFolderId =
     initialFilters.scope.type === "folder" ? initialFilters.scope.folderId ?? null : null;
   const currentTitle = getGalleryTitle(initialFilters.scope, folders);
+  const currentPage = pagination.page;
+  const totalPages = pagination.totalPages;
   const pending = pendingAction !== null || isUploading;
   const pendingMessage = isUploading
     ? "画像をアップロードしています..."
@@ -173,11 +180,31 @@ export function GalleryShell({
 
   useEffect(() => {
     setGalleryImages(images);
+    galleryImagesRef.current = images;
     setSelectedImageIds((current) => {
       const validIds = new Set(images.map((image) => image.id));
       return current.filter((id) => validIds.has(id));
     });
   }, [images]);
+
+  useEffect(() => {
+    const rawPage = searchParams.get("page");
+    const nextPage = String(initialFilters.page);
+
+    if (rawPage === nextPage || (!rawPage && nextPage === "1")) {
+      return;
+    }
+
+    const params = new URLSearchParams(searchParams.toString());
+
+    if (nextPage === "1") {
+      params.delete("page");
+    } else {
+      params.set("page", nextPage);
+    }
+
+    router.replace(`/gallery?${params.toString()}`);
+  }, [initialFilters.page, router, searchParams]);
 
   useEffect(() => {
     if (!isSelectionMode && selectedImageIds.length > 0) {
@@ -217,7 +244,7 @@ export function GalleryShell({
     };
   }, []);
 
-  function pushToast(variant: ToastItem["variant"], message: string) {
+  const pushToast = useCallback((variant: ToastItem["variant"], message: string) => {
     const nextItem = {
       id: crypto.randomUUID(),
       variant,
@@ -230,23 +257,28 @@ export function GalleryShell({
       setToasts((current) => current.filter((item) => item.id !== nextItem.id));
     }, 3500);
     toastTimeoutIdsRef.current.push(timeoutId);
-  }
+  }, []);
 
-  function refresh() {
+  const refresh = useCallback(() => {
     startTransition(() => {
       router.refresh();
     });
-  }
+  }, [router]);
 
-  function resetSelectionState(nextMode = false) {
+  const resetSelectionState = useCallback((nextMode = false) => {
     setIsSelectionMode(nextMode);
     setSelectedImageIds([]);
     setSelectionMoveTargetFolderId("");
     setIsBulkDeleteConfirmOpen(false);
-  }
+  }, []);
 
   function navigateWith(
-    next: Partial<{ scope: GalleryScope; sort: GallerySortOrder; view: GalleryViewMode }>,
+    next: Partial<{
+      scope: GalleryScope;
+      sort: GallerySortOrder;
+      view: GalleryViewMode;
+      page: number;
+    }>,
   ) {
     if (pending) {
       return;
@@ -256,14 +288,12 @@ export function GalleryShell({
     const scope = next.scope ?? initialFilters.scope;
     const sort = next.sort ?? initialFilters.sort;
     const view = next.view ?? initialFilters.view;
-    const hasChanged =
-      scope.type !== initialFilters.scope.type ||
-      scope.folderId !== initialFilters.scope.folderId ||
-      sort !== initialFilters.sort ||
-      view !== initialFilters.view;
     const scopeChanged =
       scope.type !== initialFilters.scope.type || scope.folderId !== initialFilters.scope.folderId;
     const sortChanged = sort !== initialFilters.sort;
+    const page = next.page ?? (scopeChanged ? 1 : initialFilters.page);
+    const pageChanged = page !== initialFilters.page;
+    const hasChanged = scopeChanged || sortChanged || view !== initialFilters.view || pageChanged;
 
     params.set("scope", scope.type);
     params.set("sort", sort);
@@ -275,12 +305,18 @@ export function GalleryShell({
       params.delete("folderId");
     }
 
+    if (page <= 1) {
+      params.delete("page");
+    } else {
+      params.set("page", String(page));
+    }
+
     if (hasChanged) {
       if (scopeChanged && (isSelectionMode || selectedImageIds.length > 0)) {
         pushToast("info", "カテゴリを変更したため選択を解除しました。");
       }
 
-      if (sortChanged && viewerState.isOpen) {
+      if ((scopeChanged || sortChanged || pageChanged) && viewerState.isOpen) {
         closeViewer();
       }
 
@@ -307,33 +343,39 @@ export function GalleryShell({
     return folderNameMap.get(folderId) ?? null;
   }
 
-  function patchGalleryImages(
+  const patchGalleryImages = useCallback((
     imageIds: string[],
     updater: (image: GalleryImageItem) => GalleryImageItem,
-  ) {
+  ) => {
     const idSet = new Set(imageIds);
-    setGalleryImages((current) =>
-      current.map((image) => (idSet.has(image.id) ? updater(image) : image)),
-    );
-  }
+    setGalleryImages((current) => {
+      const nextImages = current.map((image) => (idSet.has(image.id) ? updater(image) : image));
+      galleryImagesRef.current = nextImages;
+      return nextImages;
+    });
+  }, []);
 
-  function removeGalleryImages(imageIds: string[]) {
+  const removeGalleryImages = useCallback((imageIds: string[]) => {
     const idSet = new Set(imageIds);
-    setGalleryImages((current) => current.filter((image) => !idSet.has(image.id)));
-  }
+    setGalleryImages((current) => {
+      const nextImages = current.filter((image) => !idSet.has(image.id));
+      galleryImagesRef.current = nextImages;
+      return nextImages;
+    });
+  }, []);
 
-  function patchViewerImages(
+  const patchViewerImages = useCallback((
     imageIds: string[],
     updater: (image: GalleryImageItem) => GalleryImageItem,
-  ) {
+  ) => {
     const idSet = new Set(imageIds);
     setViewerState((current) => ({
       ...current,
       images: current.images.map((image) => (idSet.has(image.id) ? updater(image) : image)),
     }));
-  }
+  }, []);
 
-  function reconcileViewerAfterRemoval(imageIds: string[]) {
+  const reconcileViewerAfterRemoval = useCallback((imageIds: string[]) => {
     const idSet = new Set(imageIds);
 
     setViewerState((current) => {
@@ -364,14 +406,14 @@ export function GalleryShell({
         images: nextImages,
       };
     });
-  }
+  }, []);
 
-  async function runMutation(options: {
+  const runMutation = useCallback(async (options: {
     action: PendingAction;
     successMessage: string;
     errorMessage: string;
     task: () => Promise<void>;
-  }) {
+  }) => {
     if (mutationLockRef.current || uploadLockRef.current) {
       return false;
     }
@@ -394,7 +436,7 @@ export function GalleryShell({
     } finally {
       mutationLockRef.current = false;
     }
-  }
+  }, [pushToast, refresh]);
 
   async function handleCreateFolder(name: string) {
     const success = await runMutation({
@@ -456,7 +498,7 @@ export function GalleryShell({
     }
   }
 
-  async function handleToggleFavorite(imageId: string, nextValue: boolean) {
+  const handleToggleFavorite = useCallback(async (imageId: string, nextValue: boolean) => {
     await runMutation({
       action: "favorite-image",
       successMessage: nextValue ? "お気に入りに追加しました。" : "お気に入りを解除しました。",
@@ -467,7 +509,7 @@ export function GalleryShell({
         patchViewerImages([imageId], (image) => ({ ...image, is_favorite: nextValue }));
       },
     });
-  }
+  }, [patchGalleryImages, patchViewerImages, runMutation, supabase]);
 
   async function handleUploadFiles(files: File[]) {
     if (uploadLockRef.current || mutationLockRef.current) {
@@ -526,7 +568,7 @@ export function GalleryShell({
     router.refresh();
   }
 
-  function openViewer(index: number) {
+  const openViewer = useCallback((index: number) => {
     if (pending) {
       return;
     }
@@ -534,18 +576,18 @@ export function GalleryShell({
     setViewerState({
       isOpen: true,
       currentIndex: index,
-      images: galleryImages,
+      images: galleryImagesRef.current,
     });
     setIsFullscreenOpen(false);
-  }
+  }, [pending]);
 
-  function closeViewer() {
+  const closeViewer = useCallback(() => {
     setViewerState((current) => ({
       ...current,
       isOpen: false,
     }));
     setIsFullscreenOpen(false);
-  }
+  }, []);
 
   function moveViewer(direction: -1 | 1) {
     setViewerState((current) => {
@@ -587,7 +629,7 @@ export function GalleryShell({
     enterSelectionMode();
   }
 
-  function toggleSelectImage(imageId: string) {
+  const toggleSelectImage = useCallback((imageId: string) => {
     if (pending) {
       return;
     }
@@ -597,19 +639,19 @@ export function GalleryShell({
         ? current.filter((id) => id !== imageId)
         : [...current, imageId],
     );
-  }
+  }, [pending]);
 
-  function selectAllImages() {
+  const selectAllImages = useCallback(() => {
     if (pending) {
       return;
     }
 
-    setSelectedImageIds(galleryImages.map((image) => image.id));
-  }
+    setSelectedImageIds(galleryImagesRef.current.map((image) => image.id));
+  }, [pending]);
 
-  function clearSelection() {
+  const clearSelection = useCallback(() => {
     setSelectedImageIds([]);
-  }
+  }, []);
 
   async function handleViewerRename(fileName: string) {
     const currentImage = viewerState.images[viewerState.currentIndex];
@@ -885,7 +927,7 @@ export function GalleryShell({
             <div className="flex h-full flex-col px-4 py-4 sm:px-5">
               <GalleryHeader
                 title={currentTitle}
-                imageCount={galleryImages.length}
+                imageCount={pagination.totalCount}
                 sort={initialFilters.sort}
                 view={initialFilters.view}
                 isSelectionMode={isSelectionMode}
@@ -956,6 +998,22 @@ export function GalleryShell({
                     onToggleSelect={toggleSelectImage}
                     onToggleFavorite={handleToggleFavorite}
                   />
+                ) : null}
+
+                {pagination.totalCount > 0 ? (
+                  <div className="mt-4">
+                    <GalleryPaginationControls
+                      currentPage={currentPage}
+                      totalPages={totalPages}
+                      pageSize={pagination.pageSize}
+                      totalCount={pagination.totalCount}
+                      pending={pending}
+                      hasPreviousPage={pagination.hasPreviousPage}
+                      hasNextPage={pagination.hasNextPage}
+                      onPrevious={() => navigateWith({ page: currentPage - 1 })}
+                      onNext={() => navigateWith({ page: currentPage + 1 })}
+                    />
+                  </div>
                 ) : null}
               </div>
             </div>

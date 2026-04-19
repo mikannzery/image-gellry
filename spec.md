@@ -148,3 +148,16 @@ type ViewerState = {
 - ギャラリー一覧の選択状態判定は `Set` を使い、描画ごとの線形検索を減らす。
 - toast の自動消去タイマーは unmount 時に確実に掃除する。
 - signed URL 生成に失敗しても一覧全体を壊さず、対象画像だけ `signed_url: null` として扱えるようにする。
+- gallery 一覧は `page` クエリを使ったページネーション対応とし、1 ページあたり 32 件を取得・表示する。
+- page は現在の scope / folder / sort / view と同じ URL クエリで扱い、scope または folder 切り替え時は `page=1` に戻す。
+- グリッド表示は desktop で 4 列を優先する。
+- 一覧下部に前へ / 次へボタンと現在ページ表示を置き、disabled 条件は「前ページなし」「次ページなし」に合わせる。
+- viewerState は現在ページに表示している画像配列をそのまま使う。ページ切り替え時は viewer を閉じ、別ページの画像を混在させない。
+- gallery 一覧では viewer 用の大きい画像 URL と別に、一覧描画専用の軽量サムネイル URL を使う。
+- 一覧サムネイルは Supabase Storage の画像 transform で幅 640 / 高さ 512 / cover / quality 70 の signed URL を生成する。
+- 詳細モーダルと全画面ビューアは引き続き full-size の signed URL を使う。
+- 一覧カードは next/image を使い、4 列グリッドに合わせた `sizes` を設定し、1 画面目の一部のみ eager、それ以外は lazy 読み込みにする。
+- `ImageGridCard` と `ImageListRow` は memo 化して、未変更カードの再レンダリングを減らす。
+- `src/lib/gallery/mutations.ts` の画像更新系 mutation は共通 helper へ集約し、単体操作と一括操作で同じ update ロジックを再利用する。
+- 画像一覧 query は毎回 fresh な Supabase query builder を組み立てる。builder の再利用には依存しない。
+- 一覧カードの `React.memo` は stale callback を残さない前提で使い、viewer を開く処理と選択処理は ref / stable callback で現在状態を参照する。

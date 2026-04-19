@@ -3,6 +3,7 @@ import { requireUser } from "@/lib/auth/guard";
 import {
   listFolders,
   listImages,
+  parseGalleryPage,
   parseGalleryScope,
   parseGallerySort,
   parseGalleryView,
@@ -20,8 +21,9 @@ export default async function GalleryPage({ searchParams }: GalleryPageProps) {
   const scope = parseGalleryScope(resolvedSearchParams);
   const sort = parseGallerySort(resolvedSearchParams);
   const view = parseGalleryView(resolvedSearchParams);
+  const page = parseGalleryPage(resolvedSearchParams);
   const folders = await listFolders(supabase, user.id);
-  const images = await listImages(supabase, user.id, scope, sort, folders);
+  const { images, pagination } = await listImages(supabase, user.id, scope, sort, folders, page);
 
   return (
     <GalleryShell
@@ -29,7 +31,8 @@ export default async function GalleryPage({ searchParams }: GalleryPageProps) {
       userEmail={user.email ?? ""}
       folders={folders}
       images={images}
-      initialFilters={{ scope, sort, view }}
+      pagination={pagination}
+      initialFilters={{ scope, sort, view, page: pagination.page }}
     />
   );
 }

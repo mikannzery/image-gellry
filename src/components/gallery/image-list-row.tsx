@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import Image from "next/image";
 
 import { formatBytes, formatDateTime, formatDimensions } from "@/lib/utils/format";
@@ -16,7 +17,7 @@ type ImageListRowProps = {
   onToggleFavorite: (imageId: string, nextValue: boolean) => Promise<void>;
 };
 
-export function ImageListRow({
+function ImageListRowComponent({
   image,
   index,
   isSelectionMode,
@@ -26,6 +27,7 @@ export function ImageListRow({
   onToggleSelect,
   onToggleFavorite,
 }: ImageListRowProps) {
+  const imageUrl = image.thumbnail_url ?? image.signed_url;
   const handlePrimaryAction = () => {
     if (pending) {
       return;
@@ -79,13 +81,16 @@ export function ImageListRow({
 
       <td className="px-3 py-2.5">
         <div className="h-12 w-12 overflow-hidden rounded-md bg-slate-100">
-          {image.signed_url ? (
+          {imageUrl ? (
             <Image
-              src={image.signed_url}
+              src={imageUrl}
               alt={image.file_name}
               width={48}
               height={48}
+              sizes="48px"
               className="h-full w-full object-cover"
+              priority={index < 8}
+              loading={index < 8 ? "eager" : "lazy"}
               unoptimized
             />
           ) : (
@@ -125,3 +130,13 @@ export function ImageListRow({
     </tr>
   );
 }
+
+export const ImageListRow = memo(
+  ImageListRowComponent,
+  (previousProps, nextProps) =>
+    previousProps.image === nextProps.image &&
+    previousProps.index === nextProps.index &&
+    previousProps.isSelectionMode === nextProps.isSelectionMode &&
+    previousProps.selected === nextProps.selected &&
+    previousProps.pending === nextProps.pending,
+);

@@ -20,9 +20,28 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+async function updateImages(
+  supabase: SupabaseClient,
+  imageIds: string[],
+  values: Record<string, string | boolean | null>,
+  fallbackMessage: string,
+) {
+  if (imageIds.length === 0) {
+    return;
+  }
+
+  let query = supabase.from("images").update(values);
+  query = imageIds.length === 1 ? query.eq("id", imageIds[0]) : query.in("id", imageIds);
+
+  const { error } = await query;
+
+  if (error) {
+    throw new Error(error.message || fallbackMessage);
+  }
+}
+
 export async function createFolder(supabase: SupabaseClient, name: string) {
   const trimmedName = ensureTrimmedName(name, "フォルダー");
-
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -43,7 +62,6 @@ export async function createFolder(supabase: SupabaseClient, name: string) {
 
 export async function renameFolder(supabase: SupabaseClient, id: string, name: string) {
   const trimmedName = ensureTrimmedName(name, "フォルダー");
-
   const { error } = await supabase
     .from("folders")
     .update({
@@ -78,16 +96,12 @@ export async function touchFolder(supabase: SupabaseClient, id: string) {
 }
 
 export async function toggleFavorite(supabase: SupabaseClient, id: string, nextValue: boolean) {
-  const { error } = await supabase
-    .from("images")
-    .update({
-      is_favorite: nextValue,
-    })
-    .eq("id", id);
-
-  if (error) {
-    throw new Error(error.message || "お気に入り状態を更新できませんでした。");
-  }
+  await updateImages(
+    supabase,
+    [id],
+    { is_favorite: nextValue },
+    "お気に入り状態を更新できませんでした。",
+  );
 }
 
 export async function setImagesFavorite(
@@ -95,25 +109,16 @@ export async function setImagesFavorite(
   imageIds: string[],
   nextValue: boolean,
 ) {
-  if (imageIds.length === 0) {
-    return;
-  }
-
-  const { error } = await supabase
-    .from("images")
-    .update({
-      is_favorite: nextValue,
-    })
-    .in("id", imageIds);
-
-  if (error) {
-    throw new Error(error.message || "一括お気に入り更新に失敗しました。");
-  }
+  await updateImages(
+    supabase,
+    imageIds,
+    { is_favorite: nextValue },
+    "一括お気に入り更新に失敗しました。",
+  );
 }
 
 export async function renameImage(supabase: SupabaseClient, id: string, fileName: string) {
   const trimmedName = ensureTrimmedName(fileName, "画像");
-
   const { error } = await supabase
     .from("images")
     .update({
@@ -133,16 +138,12 @@ export async function moveImageToFolder(
   imageId: string,
   folderId: string | null,
 ) {
-  const { error } = await supabase
-    .from("images")
-    .update({
-      folder_id: folderId,
-    })
-    .eq("id", imageId);
-
-  if (error) {
-    throw new Error(error.message || "フォルダー移動に失敗しました。");
-  }
+  await updateImages(
+    supabase,
+    [imageId],
+    { folder_id: folderId },
+    "フォルダー移動に失敗しました。",
+  );
 }
 
 export async function moveImagesToFolder(
@@ -150,20 +151,12 @@ export async function moveImagesToFolder(
   imageIds: string[],
   folderId: string | null,
 ) {
-  if (imageIds.length === 0) {
-    return;
-  }
-
-  const { error } = await supabase
-    .from("images")
-    .update({
-      folder_id: folderId,
-    })
-    .in("id", imageIds);
-
-  if (error) {
-    throw new Error(error.message || "一括フォルダー移動に失敗しました。");
-  }
+  await updateImages(
+    supabase,
+    imageIds,
+    { folder_id: folderId },
+    "一括フォルダー移動に失敗しました。",
+  );
 }
 
 type ImageDeleteTarget = {
@@ -179,7 +172,7 @@ async function deleteImageRecords(supabase: SupabaseClient, imageIds: string[]) 
   const { error } = await supabase.from("images").delete().in("id", imageIds);
 
   if (error) {
-    throw new Error(error.message || "画像の削除に失敗しました。");
+    throw new Error(error.message || "画像レコードの削除に失敗しました。");
   }
 }
 
@@ -205,7 +198,7 @@ export async function deleteImagesWithStorage(
     throw new Error(
       `Storage からは削除されましたが、データベース更新に失敗しました。${getErrorMessage(
         error,
-        "状態を確認して再試行してください。",
+        "状態を確認してください。",
       )}`,
     );
   }

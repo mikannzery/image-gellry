@@ -15,6 +15,7 @@ export type ImageRow = {
 
 export type GalleryImageItem = ImageRow & {
   signed_url: string | null;
+  thumbnail_url: string | null;
   folder_name: string | null;
 };
 
