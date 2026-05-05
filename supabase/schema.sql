@@ -28,6 +28,9 @@ create table if not exists public.images (
   folder_id uuid null references public.folders(id) on delete set null,
   file_name text not null,
   storage_path text not null unique,
+  thumbnail_path text null,
+  display_path text null,
+  original_path text null,
   mime_type text not null,
   size_bytes bigint not null,
   width integer not null,
@@ -45,6 +48,9 @@ create index if not exists folders_user_last_used_idx on public.folders (user_id
 create index if not exists images_user_created_idx on public.images (user_id, created_at desc);
 create index if not exists images_user_folder_created_idx on public.images (user_id, folder_id, created_at desc);
 create index if not exists images_user_favorite_created_idx on public.images (user_id, is_favorite, created_at desc);
+create index if not exists images_user_missing_derivatives_idx
+on public.images (user_id, created_at desc)
+where thumbnail_path is null or display_path is null;
 
 drop trigger if exists set_folders_updated_at on public.folders;
 create trigger set_folders_updated_at
@@ -121,7 +127,10 @@ on storage.objects
 for select
 using (
   bucket_id = 'gallery-images'
-  and auth.uid()::text = (storage.foldername(name))[1]
+  and (
+    auth.uid()::text = (storage.foldername(name))[1]
+    or auth.uid()::text = (storage.foldername(name))[2]
+  )
 );
 
 drop policy if exists "gallery_images_insert_own" on storage.objects;
@@ -130,7 +139,10 @@ on storage.objects
 for insert
 with check (
   bucket_id = 'gallery-images'
-  and auth.uid()::text = (storage.foldername(name))[1]
+  and (
+    auth.uid()::text = (storage.foldername(name))[1]
+    or auth.uid()::text = (storage.foldername(name))[2]
+  )
 );
 
 drop policy if exists "gallery_images_update_own" on storage.objects;
@@ -139,11 +151,17 @@ on storage.objects
 for update
 using (
   bucket_id = 'gallery-images'
-  and auth.uid()::text = (storage.foldername(name))[1]
+  and (
+    auth.uid()::text = (storage.foldername(name))[1]
+    or auth.uid()::text = (storage.foldername(name))[2]
+  )
 )
 with check (
   bucket_id = 'gallery-images'
-  and auth.uid()::text = (storage.foldername(name))[1]
+  and (
+    auth.uid()::text = (storage.foldername(name))[1]
+    or auth.uid()::text = (storage.foldername(name))[2]
+  )
 );
 
 drop policy if exists "gallery_images_delete_own" on storage.objects;
@@ -152,5 +170,8 @@ on storage.objects
 for delete
 using (
   bucket_id = 'gallery-images'
-  and auth.uid()::text = (storage.foldername(name))[1]
+  and (
+    auth.uid()::text = (storage.foldername(name))[1]
+    or auth.uid()::text = (storage.foldername(name))[2]
+  )
 );

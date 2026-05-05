@@ -2,6 +2,12 @@ import type { FolderRow } from "@/types/folder";
 
 export const GALLERY_BUCKET_NAME = "gallery-images";
 export const GALLERY_PAGE_SIZE = 32;
+export const GALLERY_THUMBNAIL_MAX_EDGE = 480;
+export const GALLERY_THUMBNAIL_QUALITY = 0.75;
+export const GALLERY_DISPLAY_MAX_EDGE = 1600;
+export const GALLERY_DISPLAY_QUALITY = 0.82;
+export const GALLERY_SAVE_ORIGINAL =
+  process.env.NEXT_PUBLIC_GALLERY_SAVE_ORIGINAL?.toLowerCase() === "true";
 export const GALLERY_SCOPE_TYPES = ["all", "uncategorized", "favorites", "folder"] as const;
 export const GALLERY_VIEW_MODES = ["grid", "list"] as const;
 export const GALLERY_SORT_ORDERS = ["newest", "oldest"] as const;

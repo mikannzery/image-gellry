@@ -8,6 +8,19 @@ export type ImageMetadata = {
   height: number;
 };
 
+export type GeneratedImageAsset = ImageMetadata & {
+  blob: Blob;
+  fileName: string;
+  mimeType: "image/webp";
+  sizeBytes: number;
+};
+
+type GenerateImageAssetOptions = {
+  fileName: string;
+  maxLongEdge: number;
+  quality: number;
+};
+
 export function isSupportedImageType(mimeType: string): mimeType is SupportedImageMimeType {
   return SUPPORTED_IMAGE_MIME_TYPES.includes(mimeType as SupportedImageMimeType);
 }
@@ -22,33 +35,113 @@ export function sanitizeFileName(fileName: string): string {
   return sanitized || "image";
 }
 
-export function buildStoragePath(userId: string, fileName: string, date = new Date()): string {
-  const year = `${date.getFullYear()}`;
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const randomId = crypto.randomUUID();
-  const safeName = sanitizeFileName(fileName);
-
-  return `${userId}/${year}/${month}/${randomId}-${safeName}`;
+export function buildVariantStoragePath(
+  kind: "thumbnails" | "display" | "originals",
+  userId: string,
+  imageId: string,
+  extension: string,
+): string {
+  return `${kind}/${userId}/${imageId}.${extension}`;
 }
 
-export async function getImageMetadata(file: File): Promise<ImageMetadata> {
-  const url = URL.createObjectURL(file);
+export async function getImageMetadata(file: Blob): Promise<ImageMetadata> {
+  const bitmap = await createImageBitmap(file);
 
   try {
-    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const element = new Image();
-
-      element.onload = () => resolve(element);
-      element.onerror = () => reject(new Error("画像メタ情報を取得できませんでした。"));
-      element.src = url;
-    });
-
     return {
-      width: image.naturalWidth,
-      height: image.naturalHeight,
+      width: bitmap.width,
+      height: bitmap.height,
     };
   } finally {
-    URL.revokeObjectURL(url);
+    bitmap.close();
   }
 }
 
+export async function generateCompressedImageAsset(
+  source: File,
+  options: GenerateImageAssetOptions,
+): Promise<GeneratedImageAsset> {
+  const bitmap = await createImageBitmap(source);
+
+  try {
+    const dimensions = fitWithinMaxLongEdge(bitmap.width, bitmap.height, options.maxLongEdge);
+    const canvas = document.createElement("canvas");
+    canvas.width = dimensions.width;
+    canvas.height = dimensions.height;
+
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      throw new Error("画像変換に必要な Canvas コンテキストを取得できませんでした。");
+    }
+
+    context.drawImage(bitmap, 0, 0, dimensions.width, dimensions.height);
+
+    const blob = await canvasToBlob(canvas, "image/webp", options.quality);
+
+    return {
+      blob,
+      fileName: replaceFileExtension(options.fileName, "webp"),
+      mimeType: "image/webp",
+      sizeBytes: blob.size,
+      width: dimensions.width,
+      height: dimensions.height,
+    };
+  } finally {
+    bitmap.close();
+  }
+}
+
+export function getFileExtension(fileName: string, fallback = "bin"): string {
+  const normalized = fileName.trim();
+  const extension = normalized.includes(".") ? normalized.split(".").pop() : "";
+
+  if (!extension) {
+    return fallback;
+  }
+
+  return extension.toLowerCase();
+}
+
+function fitWithinMaxLongEdge(width: number, height: number, maxLongEdge: number): ImageMetadata {
+  const longEdge = Math.max(width, height);
+
+  if (longEdge <= maxLongEdge) {
+    return { width, height };
+  }
+
+  const scale = maxLongEdge / longEdge;
+
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
+function replaceFileExtension(fileName: string, nextExtension: string): string {
+  const safeName = sanitizeFileName(fileName);
+  const baseName = safeName.replace(/\.[^.]+$/, "");
+
+  return `${baseName || "image"}.${nextExtension}`;
+}
+
+function canvasToBlob(
+  canvas: HTMLCanvasElement,
+  mimeType: "image/webp",
+  quality: number,
+): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error("画像変換結果の Blob を生成できませんでした。"));
+          return;
+        }
+
+        resolve(blob);
+      },
+      mimeType,
+      quality,
+    );
+  });
+}

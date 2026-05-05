@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "next dev",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "backfill:image-variants": "tsx scripts/backfill-image-variants.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.7.0",
@@ -23,7 +24,9 @@
     "eslint": "^8.57.0",
     "eslint-config-next": "^15.0.0",
     "postcss": "^8.4.49",
+    "sharp": "^0.34.5",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.21.0",
     "typescript": "^5.0.0"
   }
 }

@@ -4,6 +4,9 @@ export type ImageRow = {
   folder_id: string | null;
   file_name: string;
   storage_path: string;
+  thumbnail_path: string | null;
+  display_path: string | null;
+  original_path: string | null;
   mime_type: string;
   size_bytes: number;
   width: number;
@@ -14,9 +17,10 @@ export type ImageRow = {
 };
 
 export type GalleryImageItem = ImageRow & {
-  signed_url: string | null;
   thumbnail_url: string | null;
+  display_url: string | null;
   folder_name: string | null;
+  requires_derivatives: boolean;
 };
 
 export type ViewerState = {

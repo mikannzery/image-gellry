@@ -27,7 +27,7 @@ function ImageGridCardComponent({
   onToggleSelect,
   onToggleFavorite,
 }: ImageGridCardProps) {
-  const imageUrl = image.thumbnail_url ?? image.signed_url;
+  const imageUrl = image.thumbnail_url ?? image.display_url;
   const handlePrimaryAction = () => {
     if (pending) {
       return;

@@ -161,3 +161,58 @@ type ViewerState = {
 - `src/lib/gallery/mutations.ts` の画像更新系 mutation は共通 helper へ集約し、単体操作と一括操作で同じ update ロジックを再利用する。
 - 画像一覧 query は毎回 fresh な Supabase query builder を組み立てる。builder の再利用には依存しない。
 - 一覧カードの `React.memo` は stale callback を残さない前提で使い、viewer を開く処理と選択処理は ref / stable callback で現在状態を参照する。
+## 2026-05 image storage optimization
+- New uploads create browser-side derived assets before upload.
+- `thumbnail` is used for gallery grid/list rendering.
+- `display` is used for detail modal and fullscreen rendering.
+- `storage_path` stays for backward compatibility and points to the display asset for new uploads.
+- New columns: `thumbnail_path`, `display_path`, `original_path`.
+- View model marks old records without derivatives as `requires_derivatives = true`.
+
+### Asset policy
+- thumbnail: max long edge `480`, format `webp`, quality `0.75`
+- display: max long edge `1600`, format `webp`, quality `0.82`
+- original: disabled by default
+- original storage toggle: `NEXT_PUBLIC_GALLERY_SAVE_ORIGINAL=true`
+
+### Storage path policy
+- `thumbnails/{userId}/{imageId}.webp`
+- `display/{userId}/{imageId}.webp`
+- `originals/{userId}/{imageId}.{ext}` only when original storage is enabled
+- Storage policies must allow both `{userId}/...` legacy paths and `{kind}/{userId}/...` derived paths.
+
+### Legacy migration policy
+- Existing records are not converted during normal user requests.
+- Existing records without `thumbnail_path` or `display_path` continue to render through legacy fallback URLs.
+- Those records should be treated as future batch-migration targets.
+
+## 2026-05 legacy image backfill
+- Legacy records with `thumbnail_path` or `display_path` missing must be migrated with a Node.js batch script.
+- The batch script lives at `scripts/backfill-image-variants.ts`.
+- Execution entrypoint: `npm run backfill:image-variants -- --dry-run --limit 10`
+- The script uses `sharp` and a server-side Supabase service role client.
+- `SUPABASE_SERVICE_ROLE_KEY` must never be imported from client-side code.
+- The script may load `.env.local` or `.env` at runtime only for the batch process, and it reads:
+  - `NEXT_PUBLIC_SUPABASE_URL`
+  - `SUPABASE_SERVICE_ROLE_KEY`
+  - optional `SUPABASE_STORAGE_BUCKET`
+
+### Backfill target rule
+- Default target: rows where `thumbnail_path is null` or `display_path is null`
+- `--force`: regenerate even if derivative paths already exist
+- `--limit <n>`: limit processed rows per run
+- `--dry-run`: print target rows and derivative paths without uploading or updating DB
+
+### Backfill output rule
+- Thumbnail output path: `thumbnails/{userId}/{imageId}.webp`
+- Display output path: `display/{userId}/{imageId}.webp`
+- The script updates `images.thumbnail_path` and `images.display_path`
+- Existing `storage_path` is kept unchanged for legacy rows
+- The script does not delete original images
+- Failures are logged per image and do not stop the whole batch
+
+### Recommended operations
+- Run `npm run backfill:image-variants -- --dry-run --limit 10`
+- Run `npm run backfill:image-variants -- --limit 10`
+- Verify Storage and DB updates
+- Continue in small batches such as `--limit 30`

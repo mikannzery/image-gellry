@@ -137,10 +137,10 @@ export function FullscreenViewer({
       </button>
 
       <div className="pointer-events-none absolute inset-0 flex items-center justify-center px-8 py-20">
-        {currentImage.signed_url ? (
+        {currentImage.display_url ? (
           <div className="relative h-full w-full">
             <Image
-              src={currentImage.signed_url}
+              src={currentImage.display_url}
               alt={currentImage.file_name}
               fill
               sizes="100vw"

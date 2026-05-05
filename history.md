@@ -43,3 +43,19 @@
 - 2026-04-19: `src/lib/gallery/mutations.ts` を整理し、画像更新系の重複した Supabase update ロジックを `updateImages` helper に集約。
 - 2026-04-19: `src/lib/gallery/queries.ts` の画像一覧 query を fresh builder 生成に変更。page 補正時の再取得で builder を使い回さず、将来のライブラリ更新でも壊れにくい形に修正。
 - 2026-04-19: `GalleryShell` の一覧カード handler を `useCallback` と ref ベースに調整し、`React.memo` と stale callback がぶつかる長期運用リスクを解消。
+## 2026-05-04
+- Added browser-side image derivative generation for new uploads.
+- New uploads now store `thumbnail`, `display`, and optional `original` assets in Supabase Storage.
+- Gallery list/grid now prefer lightweight thumbnail URLs.
+- Detail modal and fullscreen viewer now prefer display URLs.
+- Added backward-compatible image columns and Storage policy updates in `supabase/schema.sql`.
+- Added `supabase/migrations/20260504_add_image_variants.sql`.
+- Added `NEXT_PUBLIC_GALLERY_SAVE_ORIGINAL` to `.env.example`.
+- Documented derivative storage policy and legacy migration guidance in `spec.md`.
+
+## 2026-05-04 legacy backfill
+- Added `scripts/backfill-image-variants.ts` for legacy image derivative generation.
+- Added `npm run backfill:image-variants`.
+- Added `sharp` and `tsx` for batch image conversion and script execution.
+- Added `SUPABASE_SERVICE_ROLE_KEY` and optional `SUPABASE_STORAGE_BUCKET` keys to `.env.example`.
+- Documented dry-run, limit, and force operation rules in `spec.md`.

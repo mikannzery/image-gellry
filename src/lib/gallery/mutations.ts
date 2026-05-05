@@ -162,6 +162,9 @@ export async function moveImagesToFolder(
 type ImageDeleteTarget = {
   id: string;
   storage_path: string;
+  thumbnail_path?: string | null;
+  display_path?: string | null;
+  original_path?: string | null;
 };
 
 async function deleteImageRecords(supabase: SupabaseClient, imageIds: string[]) {
@@ -184,7 +187,15 @@ export async function deleteImagesWithStorage(
     return;
   }
 
-  const storagePaths = images.map((image) => image.storage_path);
+  const storagePaths = Array.from(
+    new Set(
+      images.flatMap((image) =>
+        [image.storage_path, image.thumbnail_path, image.display_path, image.original_path].filter(
+          (path): path is string => Boolean(path),
+        ),
+      ),
+    ),
+  );
   const imageIds = images.map((image) => image.id);
   const { error: storageError } = await supabase.storage.from(GALLERY_BUCKET_NAME).remove(storagePaths);
 

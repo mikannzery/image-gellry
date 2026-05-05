@@ -13,19 +13,20 @@ import type { GalleryImageItem, ImageRow } from "@/types/image";
 
 type SearchParamsValue = string | string[] | undefined;
 type SearchParamsShape = Record<string, SearchParamsValue>;
+type StorageSignedUrlEntry = {
+  path: string;
+  signedUrl: string | null;
+};
+
 const SIGNED_URL_TTL_SECONDS = 60 * 60;
-const GALLERY_THUMBNAIL_TRANSFORM = {
+const LEGACY_THUMBNAIL_TRANSFORM = {
   width: 640,
   height: 512,
   resize: "cover" as const,
   quality: 70,
 };
 
-function buildImagesQuery(
-  supabase: SupabaseClient,
-  userId: string,
-  scope: GalleryScope,
-) {
+function buildImagesQuery(supabase: SupabaseClient, userId: string, scope: GalleryScope) {
   let query = supabase.from("images").select("*", { count: "exact" }).eq("user_id", userId);
 
   if (scope.type === "uncategorized") {
@@ -152,40 +153,64 @@ export async function listImages(
 
   const folderMap = new Map(folders.map((folder) => [folder.id, folder.name]));
   const storage = supabase.storage.from(GALLERY_BUCKET_NAME);
-  const [{ data: signedUrls, error: signedUrlsError }, thumbnailResults] = await Promise.all([
-    storage.createSignedUrls(
-      rows.map((row) => row.storage_path),
-      SIGNED_URL_TTL_SECONDS,
-    ),
-    Promise.all(
-      rows.map((row) =>
-        storage.createSignedUrl(row.storage_path, SIGNED_URL_TTL_SECONDS, {
-          transform: GALLERY_THUMBNAIL_TRANSFORM,
-        }),
-      ),
-    ),
-  ]);
-
-  const signedMap = new Map(
-    ((signedUrlsError ? [] : signedUrls) ?? []).map((item) => [
-      item.path,
-      item.error ? null : item.signedUrl,
-    ]),
+  const displayPaths = Array.from(
+    new Set(rows.map((row) => row.display_path ?? row.storage_path).filter(Boolean)),
   );
-  const thumbnailMap = new Map(
-    rows.map((row, index) => [
-      row.storage_path,
-      thumbnailResults[index]?.error ? null : thumbnailResults[index]?.data?.signedUrl ?? null,
-    ]),
+  const thumbnailPaths = Array.from(
+    new Set(rows.map((row) => row.thumbnail_path).filter((path): path is string => Boolean(path))),
+  );
+  const legacyRows = rows.filter((row) => !row.thumbnail_path);
+  const [{ data: displaySignedUrls, error: displayError }, { data: thumbnailSignedUrls, error: thumbnailError }] =
+    await Promise.all([
+      displayPaths.length > 0
+        ? storage.createSignedUrls(displayPaths, SIGNED_URL_TTL_SECONDS)
+        : Promise.resolve({ data: [], error: null }),
+      thumbnailPaths.length > 0
+        ? storage.createSignedUrls(thumbnailPaths, SIGNED_URL_TTL_SECONDS)
+        : Promise.resolve({ data: [], error: null }),
+    ]);
+
+  const legacyThumbnailResults = await Promise.all(
+    legacyRows.map(async (row) => {
+      const basePath = row.display_path ?? row.storage_path;
+      const { data: transformedData, error: transformedError } = await storage.createSignedUrl(
+        basePath,
+        SIGNED_URL_TTL_SECONDS,
+        {
+          transform: LEGACY_THUMBNAIL_TRANSFORM,
+        },
+      );
+
+      return {
+        path: basePath,
+        signedUrl: transformedError ? null : transformedData?.signedUrl ?? null,
+      } satisfies StorageSignedUrlEntry;
+    }),
+  );
+
+  const displayMap = createSignedUrlMap(displayError ? [] : displaySignedUrls ?? []);
+  const thumbnailMap = createSignedUrlMap(thumbnailError ? [] : thumbnailSignedUrls ?? []);
+  const legacyThumbnailMap = new Map(
+    legacyThumbnailResults.map((entry) => [entry.path, entry.signedUrl] as const),
   );
 
   return {
-    images: rows.map((row) => ({
-      ...row,
-      signed_url: signedMap.get(row.storage_path) ?? null,
-      thumbnail_url: thumbnailMap.get(row.storage_path) ?? null,
-      folder_name: row.folder_id ? folderMap.get(row.folder_id) ?? null : null,
-    })),
+    images: rows.map((row) => {
+      const displayPath = row.display_path ?? row.storage_path;
+      const thumbnailUrl =
+        (row.thumbnail_path ? thumbnailMap.get(row.thumbnail_path) : null) ??
+        legacyThumbnailMap.get(displayPath) ??
+        displayMap.get(displayPath) ??
+        null;
+
+      return {
+        ...row,
+        display_url: displayMap.get(displayPath) ?? null,
+        thumbnail_url: thumbnailUrl,
+        folder_name: row.folder_id ? folderMap.get(row.folder_id) ?? null : null,
+        requires_derivatives: !row.thumbnail_path || !row.display_path,
+      } satisfies GalleryImageItem;
+    }),
     pagination,
   };
 }
@@ -196,4 +221,16 @@ function takeFirst(value: SearchParamsValue): string | undefined {
   }
 
   return value;
+}
+
+function createSignedUrlMap(
+  entries: { path: string | null; signedUrl: string | null; error?: string | null }[],
+) {
+  return new Map(
+    entries
+      .filter((entry): entry is { path: string; signedUrl: string | null; error?: string | null } =>
+        Boolean(entry.path),
+      )
+      .map((entry) => [entry.path, entry.error ? null : entry.signedUrl] as const),
+  );
 }

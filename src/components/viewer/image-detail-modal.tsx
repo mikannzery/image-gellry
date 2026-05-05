@@ -111,9 +111,9 @@ export function ImageDetailModal({
         className="grid h-[min(88vh,920px)] w-full max-w-6xl gap-0 overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-soft lg:grid-cols-[minmax(0,1.15fr)_420px]"
       >
         <div className="relative flex min-h-[360px] items-center justify-center bg-slate-950 px-6 py-6">
-          {currentImage.signed_url ? (
+          {currentImage.display_url ? (
             <Image
-              src={currentImage.signed_url}
+              src={currentImage.display_url}
               alt={currentImage.file_name}
               fill
               sizes="(max-width: 1024px) 100vw, 70vw"
