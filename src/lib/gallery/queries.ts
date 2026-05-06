@@ -18,7 +18,7 @@ type StorageSignedUrlEntry = {
   signedUrl: string | null;
 };
 
-const SIGNED_URL_TTL_SECONDS = 60 * 60;
+const SIGNED_URL_TTL_SECONDS = parseSignedUrlExpiresIn(process.env.GALLERY_SIGNED_URL_EXPIRES_IN);
 const LEGACY_THUMBNAIL_TRANSFORM = {
   width: 640,
   height: 512,
@@ -105,9 +105,16 @@ export async function listImages(
   folders: FolderRow[],
   page: number,
 ): Promise<{ images: GalleryImageItem[]; pagination: GalleryPagination }> {
+  const queryStart = Date.now();
   const ascending = sort === "oldest";
   const start = (page - 1) * GALLERY_PAGE_SIZE;
   const end = start + GALLERY_PAGE_SIZE - 1;
+  debugGalleryQuery("start", {
+    scope: scope.type,
+    folderId: scope.type === "folder" ? scope.folderId ?? null : null,
+    sort,
+    page,
+  });
   const { data, error, count } = await buildImagesQuery(supabase, userId, scope)
     .order("created_at", { ascending })
     .range(start, end);
@@ -145,6 +152,15 @@ export async function listImages(
   } satisfies GalleryPagination;
 
   if (rows.length === 0) {
+    debugGalleryQuery("end", {
+      scope: scope.type,
+      folderId: scope.type === "folder" ? scope.folderId ?? null : null,
+      sort,
+      page: safePage,
+      rows: 0,
+      signedUrlCount: 0,
+      elapsedMs: Date.now() - queryStart,
+    });
     return {
       images: [],
       pagination,
@@ -160,6 +176,16 @@ export async function listImages(
     new Set(rows.map((row) => row.thumbnail_path).filter((path): path is string => Boolean(path))),
   );
   const legacyRows = rows.filter((row) => !row.thumbnail_path);
+  debugGalleryQuery("signed-url-start", {
+    scope: scope.type,
+    folderId: scope.type === "folder" ? scope.folderId ?? null : null,
+    sort,
+    page: safePage,
+    displayCount: displayPaths.length,
+    thumbnailCount: thumbnailPaths.length,
+    legacyThumbnailCount: legacyRows.length,
+    expiresIn: SIGNED_URL_TTL_SECONDS,
+  });
   const [{ data: displaySignedUrls, error: displayError }, { data: thumbnailSignedUrls, error: thumbnailError }] =
     await Promise.all([
       displayPaths.length > 0
@@ -193,6 +219,17 @@ export async function listImages(
   const legacyThumbnailMap = new Map(
     legacyThumbnailResults.map((entry) => [entry.path, entry.signedUrl] as const),
   );
+  debugGalleryQuery("end", {
+    scope: scope.type,
+    folderId: scope.type === "folder" ? scope.folderId ?? null : null,
+    sort,
+    page: safePage,
+    rows: rows.length,
+    displayCount: displayPaths.length,
+    thumbnailCount: thumbnailPaths.length,
+    legacyThumbnailCount: legacyRows.length,
+    elapsedMs: Date.now() - queryStart,
+  });
 
   return {
     images: rows.map((row) => {
@@ -233,4 +270,22 @@ function createSignedUrlMap(
       )
       .map((entry) => [entry.path, entry.error ? null : entry.signedUrl] as const),
   );
+}
+
+function parseSignedUrlExpiresIn(value: string | undefined) {
+  const parsed = Number.parseInt(value ?? "", 10);
+
+  if (!Number.isFinite(parsed) || parsed < 60) {
+    return 60 * 60 * 6;
+  }
+
+  return parsed;
+}
+
+function debugGalleryQuery(message: string, details: Record<string, unknown>) {
+  if (process.env.NODE_ENV !== "development") {
+    return;
+  }
+
+  console.debug(`[gallery-query] ${message}`, details);
 }

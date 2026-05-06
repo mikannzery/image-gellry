@@ -59,3 +59,11 @@
 - Added `sharp` and `tsx` for batch image conversion and script execution.
 - Added `SUPABASE_SERVICE_ROLE_KEY` and optional `SUPABASE_STORAGE_BUCKET` keys to `.env.example`.
 - Documented dry-run, limit, and force operation rules in `spec.md`.
+
+## 2026-05-06 gallery switching performance
+- Moved grid/list view switching to `GalleryShell` client state.
+- Kept `view` out of the image data cache key.
+- Added short-lived in-memory page cache keyed by user, scope, folder, sort, and page.
+- Added development-only performance logs for query, signed URL generation, cache hit/miss, and view-only switching.
+- Made signed URL expiry configurable with `GALLERY_SIGNED_URL_EXPIRES_IN`.
+- Stabilized the Supabase client instance inside `GalleryShell` so memoized card callbacks are less likely to churn.

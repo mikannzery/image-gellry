@@ -1,7 +1,7 @@
 "use client";
 
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 
 import { ImageGrid } from "@/components/gallery/image-grid";
 import { ImageList } from "@/components/gallery/image-list";
@@ -65,6 +65,15 @@ type PendingAction =
   | "bulk-move"
   | "bulk-favorite";
 
+type CachedGalleryPage = {
+  images: GalleryImageItem[];
+  pagination: GalleryPagination;
+  cachedAt: number;
+};
+
+const GALLERY_CLIENT_CACHE_TTL_MS = 3 * 60 * 1000;
+const galleryPageCache = new Map<string, CachedGalleryPage>();
+
 const pendingMessages: Record<PendingAction, string> = {
   "create-folder": "フォルダーを作成しています...",
   "rename-folder": "フォルダー名を保存しています...",
@@ -84,6 +93,73 @@ function resolveErrorMessage(error: unknown, fallback: string) {
   }
 
   return fallback;
+}
+
+function createGalleryDataKey(
+  userId: string,
+  scope: GalleryScope,
+  sort: GallerySortOrder,
+  page: number,
+) {
+  return [
+    userId,
+    scope.type,
+    scope.type === "folder" ? scope.folderId ?? "" : "",
+    sort,
+    page,
+  ].join(":");
+}
+
+function getCachedGalleryPage(key: string) {
+  const cached = galleryPageCache.get(key);
+
+  if (!cached) {
+    return null;
+  }
+
+  if (Date.now() - cached.cachedAt > GALLERY_CLIENT_CACHE_TTL_MS) {
+    galleryPageCache.delete(key);
+    return null;
+  }
+
+  return cached;
+}
+
+function setCachedGalleryPage(
+  key: string,
+  images: GalleryImageItem[],
+  pagination: GalleryPagination,
+) {
+  galleryPageCache.set(key, {
+    images,
+    pagination,
+    cachedAt: Date.now(),
+  });
+}
+
+function createGalleryUrl(filters: GalleryFilters) {
+  const params = new URLSearchParams();
+  params.set("scope", filters.scope.type);
+  params.set("sort", filters.sort);
+  params.set("view", filters.view);
+
+  if (filters.scope.type === "folder" && filters.scope.folderId) {
+    params.set("folderId", filters.scope.folderId);
+  }
+
+  if (filters.page > 1) {
+    params.set("page", String(filters.page));
+  }
+
+  return `/gallery?${params.toString()}`;
+}
+
+function debugGalleryPerformance(message: string, details?: Record<string, unknown>) {
+  if (process.env.NODE_ENV !== "development") {
+    return;
+  }
+
+  console.debug(`[gallery] ${message}`, details ?? {});
 }
 
 function getEmptyStateCopy(scope: GalleryScope, folders: FolderRow[]) {
@@ -130,8 +206,7 @@ export function GalleryShell({
   initialFilters,
 }: GalleryShellProps) {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const supabase = createClientSupabaseClient();
+  const supabase = useMemo(() => createClientSupabaseClient(), []);
   const mutationLockRef = useRef(false);
   const uploadLockRef = useRef(false);
   const fullscreenReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -145,6 +220,8 @@ export function GalleryShell({
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [activeFilters, setActiveFilters] = useState<GalleryFilters>(initialFilters);
+  const [activePagination, setActivePagination] = useState<GalleryPagination>(pagination);
   const [viewerState, setViewerState] = useState<ViewerState>({
     isOpen: false,
     currentIndex: 0,
@@ -158,10 +235,10 @@ export function GalleryShell({
   const galleryImagesRef = useRef<GalleryImageItem[]>(images);
 
   const currentFolderId =
-    initialFilters.scope.type === "folder" ? initialFilters.scope.folderId ?? null : null;
-  const currentTitle = getGalleryTitle(initialFilters.scope, folders);
-  const currentPage = pagination.page;
-  const totalPages = pagination.totalPages;
+    activeFilters.scope.type === "folder" ? activeFilters.scope.folderId ?? null : null;
+  const currentTitle = getGalleryTitle(activeFilters.scope, folders);
+  const currentPage = activePagination.page;
+  const totalPages = activePagination.totalPages;
   const pending = pendingAction !== null || isUploading;
   const pendingMessage = isUploading
     ? "画像をアップロードしています..."
@@ -174,37 +251,45 @@ export function GalleryShell({
   );
   const selectedImageIdSet = useMemo(() => new Set(selectedImageIds), [selectedImageIds]);
   const emptyStateCopy = useMemo(
-    () => getEmptyStateCopy(initialFilters.scope, folders),
-    [initialFilters.scope, folders],
+    () => getEmptyStateCopy(activeFilters.scope, folders),
+    [activeFilters.scope, folders],
   );
 
   useEffect(() => {
+    const cacheKey = createGalleryDataKey(
+      userId,
+      initialFilters.scope,
+      initialFilters.sort,
+      pagination.page,
+    );
+
+    setCachedGalleryPage(cacheKey, images, pagination);
+    setActiveFilters({ ...initialFilters, page: pagination.page });
+    setActivePagination(pagination);
     setGalleryImages(images);
     galleryImagesRef.current = images;
     setSelectedImageIds((current) => {
       const validIds = new Set(images.map((image) => image.id));
       return current.filter((id) => validIds.has(id));
     });
-  }, [images]);
+    debugGalleryPerformance("server data applied", {
+      key: cacheKey,
+      count: images.length,
+      page: pagination.page,
+    });
+  }, [images, initialFilters, pagination, userId]);
 
   useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
     const rawPage = searchParams.get("page");
-    const nextPage = String(initialFilters.page);
+    const nextPage = String(activeFilters.page);
 
     if (rawPage === nextPage || (!rawPage && nextPage === "1")) {
       return;
     }
 
-    const params = new URLSearchParams(searchParams.toString());
-
-    if (nextPage === "1") {
-      params.delete("page");
-    } else {
-      params.set("page", nextPage);
-    }
-
-    router.replace(`/gallery?${params.toString()}`);
-  }, [initialFilters.page, router, searchParams]);
+    window.history.replaceState(null, "", createGalleryUrl(activeFilters));
+  }, [activeFilters]);
 
   useEffect(() => {
     if (!isSelectionMode && selectedImageIds.length > 0) {
@@ -260,6 +345,7 @@ export function GalleryShell({
   }, []);
 
   const refresh = useCallback(() => {
+    galleryPageCache.clear();
     startTransition(() => {
       router.refresh();
     });
@@ -284,31 +370,37 @@ export function GalleryShell({
       return;
     }
 
-    const params = new URLSearchParams(searchParams.toString());
-    const scope = next.scope ?? initialFilters.scope;
-    const sort = next.sort ?? initialFilters.sort;
-    const view = next.view ?? initialFilters.view;
+    const scope = next.scope ?? activeFilters.scope;
+    const sort = next.sort ?? activeFilters.sort;
+    const view = next.view ?? activeFilters.view;
     const scopeChanged =
-      scope.type !== initialFilters.scope.type || scope.folderId !== initialFilters.scope.folderId;
-    const sortChanged = sort !== initialFilters.sort;
-    const page = next.page ?? (scopeChanged ? 1 : initialFilters.page);
-    const pageChanged = page !== initialFilters.page;
-    const hasChanged = scopeChanged || sortChanged || view !== initialFilters.view || pageChanged;
+      scope.type !== activeFilters.scope.type || scope.folderId !== activeFilters.scope.folderId;
+    const sortChanged = sort !== activeFilters.sort;
+    const viewChanged = view !== activeFilters.view;
+    const page = next.page ?? (scopeChanged || sortChanged ? 1 : activeFilters.page);
+    const pageChanged = page !== activeFilters.page;
+    const dataChanged = scopeChanged || sortChanged || pageChanged;
+    const hasChanged = dataChanged || viewChanged;
 
-    params.set("scope", scope.type);
-    params.set("sort", sort);
-    params.set("view", view);
-
-    if (scope.type === "folder" && scope.folderId) {
-      params.set("folderId", scope.folderId);
-    } else {
-      params.delete("folderId");
+    if (!hasChanged) {
+      return;
     }
 
-    if (page <= 1) {
-      params.delete("page");
-    } else {
-      params.set("page", String(page));
+    const nextFilters = { scope, sort, view, page } satisfies GalleryFilters;
+    const nextUrl = createGalleryUrl(nextFilters);
+
+    if (viewChanged && !dataChanged) {
+      setActiveFilters(nextFilters);
+      resetSelectionState(false);
+      window.history.replaceState(null, "", nextUrl);
+      debugGalleryPerformance("view changed without data query", {
+        view,
+        scope: scope.type,
+        folderId: scope.folderId ?? null,
+        sort,
+        page,
+      });
+      return;
     }
 
     if (hasChanged) {
@@ -316,7 +408,7 @@ export function GalleryShell({
         pushToast("info", "カテゴリを変更したため選択を解除しました。");
       }
 
-      if ((scopeChanged || sortChanged || pageChanged) && viewerState.isOpen) {
+      if (dataChanged && viewerState.isOpen) {
         closeViewer();
       }
 
@@ -326,13 +418,40 @@ export function GalleryShell({
     if (
       scope.type === "folder" &&
       scope.folderId &&
-      (initialFilters.scope.type !== "folder" || initialFilters.scope.folderId !== scope.folderId)
+      (activeFilters.scope.type !== "folder" || activeFilters.scope.folderId !== scope.folderId)
     ) {
       lastTouchedFolderIdRef.current = scope.folderId;
       void touchFolder(supabase, scope.folderId).catch(() => {});
     }
 
-    router.push(`/gallery?${params.toString()}`);
+    const cacheKey = createGalleryDataKey(userId, scope, sort, page);
+    const cachedPage = getCachedGalleryPage(cacheKey);
+
+    if (cachedPage) {
+      setActiveFilters(nextFilters);
+      setActivePagination(cachedPage.pagination);
+      setGalleryImages(cachedPage.images);
+      galleryImagesRef.current = cachedPage.images;
+      window.history.pushState(null, "", nextUrl);
+      debugGalleryPerformance("cache hit", {
+        key: cacheKey,
+        count: cachedPage.images.length,
+        scope: scope.type,
+        folderId: scope.folderId ?? null,
+        sort,
+        page,
+      });
+      return;
+    }
+
+    debugGalleryPerformance("cache miss, navigating for server query", {
+      key: cacheKey,
+      scope: scope.type,
+      folderId: scope.folderId ?? null,
+      sort,
+      page,
+    });
+    router.push(nextUrl);
   }
 
   function getFolderName(folderId: string | null) {
@@ -478,7 +597,7 @@ export function GalleryShell({
     }
 
     const deletingCurrentFolder =
-      initialFilters.scope.type === "folder" && initialFilters.scope.folderId === folderToDelete.id;
+      activeFilters.scope.type === "folder" && activeFilters.scope.folderId === folderToDelete.id;
 
     const success = await runMutation({
       action: "delete-folder",
@@ -523,7 +642,7 @@ export function GalleryShell({
       try {
         const results = await uploadImages(supabase, {
           userId,
-          scope: initialFilters.scope,
+          scope: activeFilters.scope,
           files,
         });
 
@@ -910,7 +1029,7 @@ export function GalleryShell({
         <div className="mx-auto grid min-h-[calc(100vh-1.5rem)] max-w-[1560px] grid-cols-1 overflow-hidden rounded-2xl border border-slate-200 bg-white lg:grid-cols-[248px_minmax(0,1fr)]">
           <Sidebar
             userEmail={userEmail}
-            currentScope={initialFilters.scope}
+            currentScope={activeFilters.scope}
             folders={folders}
             pending={pending}
             onSelectAll={() => navigateWith({ scope: { type: "all" } })}
@@ -927,9 +1046,9 @@ export function GalleryShell({
             <div className="flex h-full flex-col px-4 py-4 sm:px-5">
               <GalleryHeader
                 title={currentTitle}
-                imageCount={pagination.totalCount}
-                sort={initialFilters.sort}
-                view={initialFilters.view}
+                imageCount={activePagination.totalCount}
+                sort={activeFilters.sort}
+                view={activeFilters.view}
                 isSelectionMode={isSelectionMode}
                 pending={pending}
                 onChangeSort={(sort) => navigateWith({ sort })}
@@ -976,7 +1095,7 @@ export function GalleryShell({
                   />
                 ) : null}
 
-                {galleryImages.length > 0 && initialFilters.view === "grid" ? (
+                {galleryImages.length > 0 && activeFilters.view === "grid" ? (
                   <ImageGrid
                     images={galleryImages}
                     isSelectionMode={isSelectionMode}
@@ -988,7 +1107,7 @@ export function GalleryShell({
                   />
                 ) : null}
 
-                {galleryImages.length > 0 && initialFilters.view === "list" ? (
+                {galleryImages.length > 0 && activeFilters.view === "list" ? (
                   <ImageList
                     images={galleryImages}
                     isSelectionMode={isSelectionMode}
@@ -1000,16 +1119,16 @@ export function GalleryShell({
                   />
                 ) : null}
 
-                {pagination.totalCount > 0 ? (
+                {activePagination.totalCount > 0 ? (
                   <div className="mt-4">
                     <GalleryPaginationControls
                       currentPage={currentPage}
                       totalPages={totalPages}
-                      pageSize={pagination.pageSize}
-                      totalCount={pagination.totalCount}
+                      pageSize={activePagination.pageSize}
+                      totalCount={activePagination.totalCount}
                       pending={pending}
-                      hasPreviousPage={pagination.hasPreviousPage}
-                      hasNextPage={pagination.hasNextPage}
+                      hasPreviousPage={activePagination.hasPreviousPage}
+                      hasNextPage={activePagination.hasNextPage}
                       onPrevious={() => navigateWith({ page: currentPage - 1 })}
                       onNext={() => navigateWith({ page: currentPage + 1 })}
                     />

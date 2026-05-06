@@ -216,3 +216,15 @@ type ViewerState = {
 - Run `npm run backfill:image-variants -- --limit 10`
 - Verify Storage and DB updates
 - Continue in small batches such as `--limit 30`
+
+## 2026-05 gallery switching performance
+- `view` is UI state only and is not part of the image data fetch key.
+- Grid/list switching updates `GalleryShell` client state immediately.
+- Grid/list switching updates the URL with `window.history.replaceState` and does not call `router.push`.
+- Image data fetch key is `userId + scope + folderId + sort + page`.
+- `scope`, `folderId`, `sort`, or `page` changes may fetch a new page.
+- Recently viewed pages are cached in memory for 3 minutes by that data key.
+- Cache hits update `GalleryShell` state and URL directly without regenerating signed URLs.
+- Mutations and uploads clear the client page cache before `router.refresh()`.
+- Signed URL expiry defaults to 21600 seconds and can be adjusted with `GALLERY_SIGNED_URL_EXPIRES_IN`.
+- Development builds log gallery query start/end, signed URL counts, view-only switches, and cache hits/misses.
