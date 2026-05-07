@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { touchFolder } from "@/lib/gallery/mutations";
 import {
+  assertImageCompressionSupported,
   buildVariantStoragePath,
   generateCompressedImageAsset,
   getFileExtension,
@@ -128,6 +129,8 @@ function validateFile(file: File) {
   if (file.size > MAX_IMAGE_SIZE_BYTES) {
     throw new Error("1ファイル20MBまでアップロードできます。");
   }
+
+  assertImageCompressionSupported();
 }
 
 async function uploadAsset(

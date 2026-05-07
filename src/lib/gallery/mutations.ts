@@ -167,6 +167,11 @@ type ImageDeleteTarget = {
   original_path?: string | null;
 };
 
+export type DeleteImagesWithStorageResult = {
+  storagePaths: string[];
+  storageErrorMessage: string | null;
+};
+
 async function deleteImageRecords(supabase: SupabaseClient, imageIds: string[]) {
   if (imageIds.length === 0) {
     return;
@@ -182,9 +187,12 @@ async function deleteImageRecords(supabase: SupabaseClient, imageIds: string[]) 
 export async function deleteImagesWithStorage(
   supabase: SupabaseClient,
   images: ImageDeleteTarget[],
-) {
+): Promise<DeleteImagesWithStorageResult> {
   if (images.length === 0) {
-    return;
+    return {
+      storagePaths: [],
+      storageErrorMessage: null,
+    };
   }
 
   const storagePaths = Array.from(
@@ -197,20 +205,22 @@ export async function deleteImagesWithStorage(
     ),
   );
   const imageIds = images.map((image) => image.id);
+
+  await deleteImageRecords(supabase, imageIds);
+
+  if (storagePaths.length === 0) {
+    return {
+      storagePaths,
+      storageErrorMessage: null,
+    };
+  }
+
   const { error: storageError } = await supabase.storage.from(GALLERY_BUCKET_NAME).remove(storagePaths);
 
-  if (storageError) {
-    throw new Error(storageError.message || "Storage から画像を削除できませんでした。");
-  }
-
-  try {
-    await deleteImageRecords(supabase, imageIds);
-  } catch (error) {
-    throw new Error(
-      `Storage からは削除されましたが、データベース更新に失敗しました。${getErrorMessage(
-        error,
-        "状態を確認してください。",
-      )}`,
-    );
-  }
+  return {
+    storagePaths,
+    storageErrorMessage: storageError
+      ? getErrorMessage(storageError, "Storage から画像を削除できませんでした。")
+      : null,
+  };
 }

@@ -19,13 +19,14 @@ create table if not exists public.folders (
   updated_at timestamptz not null default now(),
   constraint folders_name_not_blank check (char_length(trim(name)) > 0),
   constraint folders_name_length check (char_length(name) <= 100),
-  constraint folders_user_name_key unique (user_id, name)
+  constraint folders_user_name_key unique (user_id, name),
+  constraint folders_user_id_id_key unique (user_id, id)
 );
 
 create table if not exists public.images (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
-  folder_id uuid null references public.folders(id) on delete set null,
+  folder_id uuid null,
   file_name text not null,
   storage_path text not null unique,
   thumbnail_path text null,
@@ -41,7 +42,10 @@ create table if not exists public.images (
   constraint images_file_name_not_blank check (char_length(trim(file_name)) > 0),
   constraint images_size_non_negative check (size_bytes >= 0),
   constraint images_width_positive check (width > 0),
-  constraint images_height_positive check (height > 0)
+  constraint images_height_positive check (height > 0),
+  constraint images_folder_user_fk foreign key (user_id, folder_id)
+    references public.folders(user_id, id)
+    on delete set null (folder_id)
 );
 
 create index if not exists folders_user_last_used_idx on public.folders (user_id, last_used_at desc);
@@ -51,6 +55,15 @@ create index if not exists images_user_favorite_created_idx on public.images (us
 create index if not exists images_user_missing_derivatives_idx
 on public.images (user_id, created_at desc)
 where thumbnail_path is null or display_path is null;
+create unique index if not exists images_thumbnail_path_unique_idx
+on public.images (thumbnail_path)
+where thumbnail_path is not null;
+create unique index if not exists images_display_path_unique_idx
+on public.images (display_path)
+where display_path is not null;
+create unique index if not exists images_original_path_unique_idx
+on public.images (original_path)
+where original_path is not null;
 
 drop trigger if exists set_folders_updated_at on public.folders;
 create trigger set_folders_updated_at
@@ -129,7 +142,10 @@ using (
   bucket_id = 'gallery-images'
   and (
     auth.uid()::text = (storage.foldername(name))[1]
-    or auth.uid()::text = (storage.foldername(name))[2]
+    or (
+      (storage.foldername(name))[1] in ('thumbnails', 'display', 'originals')
+      and auth.uid()::text = (storage.foldername(name))[2]
+    )
   )
 );
 
@@ -141,7 +157,10 @@ with check (
   bucket_id = 'gallery-images'
   and (
     auth.uid()::text = (storage.foldername(name))[1]
-    or auth.uid()::text = (storage.foldername(name))[2]
+    or (
+      (storage.foldername(name))[1] in ('thumbnails', 'display', 'originals')
+      and auth.uid()::text = (storage.foldername(name))[2]
+    )
   )
 );
 
@@ -153,14 +172,20 @@ using (
   bucket_id = 'gallery-images'
   and (
     auth.uid()::text = (storage.foldername(name))[1]
-    or auth.uid()::text = (storage.foldername(name))[2]
+    or (
+      (storage.foldername(name))[1] in ('thumbnails', 'display', 'originals')
+      and auth.uid()::text = (storage.foldername(name))[2]
+    )
   )
 )
 with check (
   bucket_id = 'gallery-images'
   and (
     auth.uid()::text = (storage.foldername(name))[1]
-    or auth.uid()::text = (storage.foldername(name))[2]
+    or (
+      (storage.foldername(name))[1] in ('thumbnails', 'display', 'originals')
+      and auth.uid()::text = (storage.foldername(name))[2]
+    )
   )
 );
 
@@ -172,6 +197,9 @@ using (
   bucket_id = 'gallery-images'
   and (
     auth.uid()::text = (storage.foldername(name))[1]
-    or auth.uid()::text = (storage.foldername(name))[2]
+    or (
+      (storage.foldername(name))[1] in ('thumbnails', 'display', 'originals')
+      and auth.uid()::text = (storage.foldername(name))[2]
+    )
   )
 );

@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "incremental": false,
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": ".tmp-tests"
+  },
+  "include": [
+    "scripts/run-tests.ts",
+    "src/lib/gallery/client-cache.ts",
+    "src/lib/gallery/search-params.ts",
+    "src/lib/gallery/storage-path-policy.ts",
+    "src/types/gallery.ts",
+    "src/types/folder.ts",
+    "src/types/image.ts"
+  ]
+}

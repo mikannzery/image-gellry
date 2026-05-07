@@ -20,6 +20,13 @@ import { UploadDropzone } from "@/components/upload/upload-dropzone";
 import { FullscreenViewer } from "@/components/viewer/fullscreen-viewer";
 import { ImageDetailModal } from "@/components/viewer/image-detail-modal";
 import {
+  clearGalleryPageCache,
+  clearGalleryPageCacheForUser,
+  createGalleryDataKey,
+  getCachedGalleryPage,
+  setCachedGalleryPage,
+} from "@/lib/gallery/client-cache";
+import {
   createFolder,
   deleteImagesWithStorage,
   deleteFolder,
@@ -65,15 +72,6 @@ type PendingAction =
   | "bulk-move"
   | "bulk-favorite";
 
-type CachedGalleryPage = {
-  images: GalleryImageItem[];
-  pagination: GalleryPagination;
-  cachedAt: number;
-};
-
-const GALLERY_CLIENT_CACHE_TTL_MS = 3 * 60 * 1000;
-const galleryPageCache = new Map<string, CachedGalleryPage>();
-
 const pendingMessages: Record<PendingAction, string> = {
   "create-folder": "フォルダーを作成しています...",
   "rename-folder": "フォルダー名を保存しています...",
@@ -93,48 +91,6 @@ function resolveErrorMessage(error: unknown, fallback: string) {
   }
 
   return fallback;
-}
-
-function createGalleryDataKey(
-  userId: string,
-  scope: GalleryScope,
-  sort: GallerySortOrder,
-  page: number,
-) {
-  return [
-    userId,
-    scope.type,
-    scope.type === "folder" ? scope.folderId ?? "" : "",
-    sort,
-    page,
-  ].join(":");
-}
-
-function getCachedGalleryPage(key: string) {
-  const cached = galleryPageCache.get(key);
-
-  if (!cached) {
-    return null;
-  }
-
-  if (Date.now() - cached.cachedAt > GALLERY_CLIENT_CACHE_TTL_MS) {
-    galleryPageCache.delete(key);
-    return null;
-  }
-
-  return cached;
-}
-
-function setCachedGalleryPage(
-  key: string,
-  images: GalleryImageItem[],
-  pagination: GalleryPagination,
-) {
-  galleryPageCache.set(key, {
-    images,
-    pagination,
-    cachedAt: Date.now(),
-  });
 }
 
 function createGalleryUrl(filters: GalleryFilters) {
@@ -345,7 +301,7 @@ export function GalleryShell({
   }, []);
 
   const refresh = useCallback(() => {
-    galleryPageCache.clear();
+    clearGalleryPageCache();
     startTransition(() => {
       router.refresh();
     });
@@ -683,6 +639,7 @@ export function GalleryShell({
     }
 
     await supabase.auth.signOut();
+    clearGalleryPageCacheForUser(userId);
     router.push("/login");
     router.refresh();
   }
@@ -857,10 +814,17 @@ export function GalleryShell({
       successMessage: "画像を削除しました。",
       errorMessage: "画像を削除できませんでした。",
       task: async () => {
-        await deleteImagesWithStorage(supabase, [currentImage]);
+        const result = await deleteImagesWithStorage(supabase, [currentImage]);
         removeGalleryImages([currentImage.id]);
         reconcileViewerAfterRemoval([currentImage.id]);
         setSelectedImageIds((current) => current.filter((id) => id !== currentImage.id));
+
+        if (result.storageErrorMessage) {
+          pushToast(
+            "error",
+            `データベースからは削除されましたが、Storage の削除に失敗しました。${result.storageErrorMessage}`,
+          );
+        }
       },
     });
   }
@@ -882,7 +846,7 @@ export function GalleryShell({
       successMessage: "選択した画像を削除しました。",
       errorMessage: "一括削除に失敗しました。",
       task: async () => {
-        await deleteImagesWithStorage(supabase, targetImages);
+        const result = await deleteImagesWithStorage(supabase, targetImages);
         removeGalleryImages(targetIds);
         reconcileViewerAfterRemoval(targetIds);
         clearSelection();
@@ -890,6 +854,13 @@ export function GalleryShell({
 
         if (galleryImages.length - targetIds.length <= 0) {
           setIsSelectionMode(false);
+        }
+
+        if (result.storageErrorMessage) {
+          pushToast(
+            "error",
+            `データベースからは削除されましたが、Storage の削除に失敗しました。${result.storageErrorMessage}`,
+          );
         }
       },
     });

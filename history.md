@@ -67,3 +67,20 @@
 - Added development-only performance logs for query, signed URL generation, cache hit/miss, and view-only switching.
 - Made signed URL expiry configurable with `GALLERY_SIGNED_URL_EXPIRES_IN`.
 - Stabilized the Supabase client instance inside `GalleryShell` so memoized card callbacks are less likely to churn.
+
+## 2026-05-07 long-term operation hardening
+- Added `supabase/migrations/20260507_long_term_hardening.sql`.
+- Hardened folder/image tenant integrity with `images_folder_user_fk` and `folders_user_id_id_key`.
+- Added unique indexes for `thumbnail_path`, `display_path`, and `original_path`.
+- Tightened Storage policies to legacy `{userId}/...` and derived `thumbnails|display|originals/{userId}/...` path shapes.
+- Changed image deletion to remove DB rows first, then attempt Storage cleanup and surface a warning if Storage cleanup fails.
+- Moved gallery search-param parsing and client page-cache logic into focused helpers.
+- Added a 24-entry cap and LRU-style pruning to the gallery client page cache.
+- Cleared current-user gallery cache entries on logout.
+- Added browser support validation before client-side image compression starts.
+- Added `scripts/audit-gallery-storage.ts` and `npm run audit:gallery-storage`.
+- Added dependency-free focused tests with `scripts/run-tests.ts`, `tsconfig.test.json`, and `npm run test`.
+- Added `.tmp-tests` to `.gitignore`.
+- Attempted to add `vitest`, but npm registry access was unavailable/then timed out, so the test plan was implemented with the existing TypeScript compiler and Node instead.
+- Verification passed: `npm run typecheck`, `npm run lint`, and `npm run test`.
+- DB-connected audit/backfill dry-runs were not executed because this agent session must not read `.env` or `.env.local`.

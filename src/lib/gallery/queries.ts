@@ -1,18 +1,21 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { FolderRow } from "@/types/folder";
+export {
+  parseGalleryPage,
+  parseGalleryScope,
+  parseGallerySort,
+  parseGalleryView,
+} from "@/lib/gallery/search-params";
 import {
   GALLERY_BUCKET_NAME,
   GALLERY_PAGE_SIZE,
   type GalleryPagination,
   type GalleryScope,
   type GallerySortOrder,
-  type GalleryViewMode,
 } from "@/types/gallery";
 import type { GalleryImageItem, ImageRow } from "@/types/image";
 
-type SearchParamsValue = string | string[] | undefined;
-type SearchParamsShape = Record<string, SearchParamsValue>;
 type StorageSignedUrlEntry = {
   path: string;
   signedUrl: string | null;
@@ -42,45 +45,6 @@ function buildImagesQuery(supabase: SupabaseClient, userId: string, scope: Galle
   }
 
   return query;
-}
-
-export function parseGalleryScope(searchParams: SearchParamsShape): GalleryScope {
-  const rawScope = takeFirst(searchParams.scope);
-  const folderId = takeFirst(searchParams.folderId);
-
-  if (rawScope === "uncategorized") {
-    return { type: "uncategorized" };
-  }
-
-  if (rawScope === "favorites") {
-    return { type: "favorites" };
-  }
-
-  if (rawScope === "folder" && folderId) {
-    return { type: "folder", folderId };
-  }
-
-  return { type: "all" };
-}
-
-export function parseGallerySort(searchParams: SearchParamsShape): GallerySortOrder {
-  const rawSort = takeFirst(searchParams.sort);
-  return rawSort === "oldest" ? "oldest" : "newest";
-}
-
-export function parseGalleryView(searchParams: SearchParamsShape): GalleryViewMode {
-  const rawView = takeFirst(searchParams.view);
-  return rawView === "list" ? "list" : "grid";
-}
-
-export function parseGalleryPage(searchParams: SearchParamsShape): number {
-  const rawPage = Number.parseInt(takeFirst(searchParams.page) ?? "1", 10);
-
-  if (!Number.isFinite(rawPage) || rawPage < 1) {
-    return 1;
-  }
-
-  return rawPage;
 }
 
 export async function listFolders(supabase: SupabaseClient, userId: string): Promise<FolderRow[]> {
@@ -250,14 +214,6 @@ export async function listImages(
     }),
     pagination,
   };
-}
-
-function takeFirst(value: SearchParamsValue): string | undefined {
-  if (Array.isArray(value)) {
-    return value[0];
-  }
-
-  return value;
 }
 
 function createSignedUrlMap(

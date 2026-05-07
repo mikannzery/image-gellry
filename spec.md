@@ -224,7 +224,25 @@ type ViewerState = {
 - Image data fetch key is `userId + scope + folderId + sort + page`.
 - `scope`, `folderId`, `sort`, or `page` changes may fetch a new page.
 - Recently viewed pages are cached in memory for 3 minutes by that data key.
+- The client page cache keeps at most 24 entries and prunes least-recently-used entries.
+- Logout clears cache entries for the current user.
 - Cache hits update `GalleryShell` state and URL directly without regenerating signed URLs.
 - Mutations and uploads clear the client page cache before `router.refresh()`.
 - Signed URL expiry defaults to 21600 seconds and can be adjusted with `GALLERY_SIGNED_URL_EXPIRES_IN`.
 - Development builds log gallery query start/end, signed URL counts, view-only switches, and cache hits/misses.
+
+## 2026-05 long-term operation hardening
+- `images.folder_id` must belong to the same `user_id` as the image row.
+- The database enforces that rule with `images_folder_user_fk` against `folders(user_id, id)`.
+- Deleting a folder sets only `images.folder_id` to null and must not null out `images.user_id`.
+- `thumbnail_path`, `display_path`, and `original_path` are unique when present.
+- Storage policies allow legacy `{userId}/...` paths and derived `thumbnails|display|originals/{userId}/...` paths.
+- Storage policies no longer allow arbitrary two-level paths just because the second segment is the user id.
+- Image deletion deletes DB rows first, then attempts Storage cleanup.
+- If Storage cleanup fails after DB deletion, the UI reports that DB deletion succeeded and Storage cleanup needs follow-up.
+- `npm run audit:gallery-storage` audits cross-user folder references, path owner mismatches, duplicate DB paths, missing derivatives, orphan Storage files, and missing Storage files.
+- `npm run audit:gallery-storage -- --skip-storage` skips the Storage object walk and only checks DB-side invariants.
+- The audit script is a service-role batch tool and may load `.env.local` or `.env` only when explicitly run as an operation.
+- `npm run test` compiles focused TypeScript tests into `.tmp-tests` and runs them with Node.
+- `.tmp-tests` is generated test output and is ignored by git.
+- Upload validation checks browser support for `createImageBitmap` and Canvas `toBlob` before starting derivative generation.

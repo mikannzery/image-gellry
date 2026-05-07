@@ -25,6 +25,22 @@ export function isSupportedImageType(mimeType: string): mimeType is SupportedIma
   return SUPPORTED_IMAGE_MIME_TYPES.includes(mimeType as SupportedImageMimeType);
 }
 
+export function canGenerateCompressedImageAsset() {
+  return (
+    typeof createImageBitmap === "function" &&
+    typeof document !== "undefined" &&
+    typeof document.createElement === "function" &&
+    typeof HTMLCanvasElement !== "undefined" &&
+    typeof HTMLCanvasElement.prototype.toBlob === "function"
+  );
+}
+
+export function assertImageCompressionSupported() {
+  if (!canGenerateCompressedImageAsset()) {
+    throw new Error("このブラウザでは画像の圧縮変換に対応していません。別のブラウザでお試しください。");
+  }
+}
+
 export function sanitizeFileName(fileName: string): string {
   const sanitized = fileName
     .normalize("NFKC")

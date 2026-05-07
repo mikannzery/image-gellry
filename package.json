@@ -6,7 +6,9 @@
     "dev": "next dev",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
     "typecheck": "tsc --noEmit",
-    "backfill:image-variants": "tsx scripts/backfill-image-variants.ts"
+    "test": "tsc -p tsconfig.test.json && node .tmp-tests/scripts/run-tests.js",
+    "backfill:image-variants": "tsx scripts/backfill-image-variants.ts",
+    "audit:gallery-storage": "tsx scripts/audit-gallery-storage.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.7.0",
