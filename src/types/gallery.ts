@@ -11,6 +11,8 @@ export const GALLERY_SAVE_ORIGINAL =
 export const GALLERY_SCOPE_TYPES = ["all", "uncategorized", "favorites", "folder"] as const;
 export const GALLERY_VIEW_MODES = ["grid", "list"] as const;
 export const GALLERY_SORT_ORDERS = ["newest", "oldest"] as const;
+const GALLERY_VIEW_MODE_SET = new Set<string>(GALLERY_VIEW_MODES);
+const GALLERY_SORT_ORDER_SET = new Set<string>(GALLERY_SORT_ORDERS);
 
 export type GalleryScopeType = (typeof GALLERY_SCOPE_TYPES)[number];
 export type GalleryViewMode = (typeof GALLERY_VIEW_MODES)[number];
@@ -49,6 +51,14 @@ export type UploadImageResult = {
   imageId?: string;
   error?: string;
 };
+
+export function isGallerySortOrder(value: string): value is GallerySortOrder {
+  return GALLERY_SORT_ORDER_SET.has(value);
+}
+
+export function isGalleryViewMode(value: string): value is GalleryViewMode {
+  return GALLERY_VIEW_MODE_SET.has(value);
+}
 
 export function getGalleryTitle(scope: GalleryScope, folders: FolderRow[]): string {
   if (scope.type === "all") {

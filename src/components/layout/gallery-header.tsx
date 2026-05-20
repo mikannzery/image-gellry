@@ -1,6 +1,10 @@
 "use client";
 
-import type { GallerySortOrder, GalleryViewMode } from "@/types/gallery";
+import {
+  isGallerySortOrder,
+  type GallerySortOrder,
+  type GalleryViewMode,
+} from "@/types/gallery";
 
 type GalleryHeaderProps = {
   title: string;
@@ -39,7 +43,11 @@ export function GalleryHeader({
             <select
               className="bg-transparent text-[13px] font-medium text-slate-900 outline-none"
               value={sort}
-              onChange={(event) => onChangeSort(event.target.value as GallerySortOrder)}
+              onChange={(event) => {
+                if (isGallerySortOrder(event.target.value)) {
+                  onChangeSort(event.target.value);
+                }
+              }}
               disabled={pending}
               aria-label="画像の並び順"
             >

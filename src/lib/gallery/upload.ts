@@ -4,7 +4,7 @@ import { touchFolder } from "@/lib/gallery/mutations";
 import {
   assertImageCompressionSupported,
   buildVariantStoragePath,
-  generateCompressedImageAsset,
+  generateCompressedImageAssets,
   getFileExtension,
   isSupportedImageType,
   MAX_IMAGE_SIZE_BYTES,
@@ -37,16 +37,18 @@ export async function uploadImages(
 
       const targetFolderId = resolveFolderId(input.scope);
       const imageId = crypto.randomUUID();
-      const thumbnailAsset = await generateCompressedImageAsset(file, {
-        fileName: file.name,
-        maxLongEdge: GALLERY_THUMBNAIL_MAX_EDGE,
-        quality: GALLERY_THUMBNAIL_QUALITY,
-      });
-      const displayAsset = await generateCompressedImageAsset(file, {
-        fileName: file.name,
-        maxLongEdge: GALLERY_DISPLAY_MAX_EDGE,
-        quality: GALLERY_DISPLAY_QUALITY,
-      });
+      const [thumbnailAsset, displayAsset] = await generateCompressedImageAssets(file, [
+        {
+          fileName: file.name,
+          maxLongEdge: GALLERY_THUMBNAIL_MAX_EDGE,
+          quality: GALLERY_THUMBNAIL_QUALITY,
+        },
+        {
+          fileName: file.name,
+          maxLongEdge: GALLERY_DISPLAY_MAX_EDGE,
+          quality: GALLERY_DISPLAY_QUALITY,
+        },
+      ]);
       const thumbnailPath = buildVariantStoragePath("thumbnails", input.userId, imageId, "webp");
       const displayPath = buildVariantStoragePath("display", input.userId, imageId, "webp");
       const originalPath = GALLERY_SAVE_ORIGINAL
@@ -96,7 +98,14 @@ export async function uploadImages(
           imageId: inserted.id,
         });
       } catch (error) {
-        await cleanupUploadedAssets(supabase, uploadedAssets);
+        const cleanupErrorMessage = await cleanupUploadedAssets(supabase, uploadedAssets);
+
+        if (cleanupErrorMessage) {
+          throw new Error(
+            `${resolveUploadErrorMessage(error)} また、アップロード済みファイルのクリーンアップにも失敗しました: ${cleanupErrorMessage}`,
+          );
+        }
+
         throw error;
       }
 
@@ -119,6 +128,14 @@ export async function uploadImages(
 
 function resolveFolderId(scope: GalleryScope) {
   return scope.type === "folder" ? scope.folderId ?? null : null;
+}
+
+function resolveUploadErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  return "アップロードに失敗しました。";
 }
 
 function validateFile(file: File) {
@@ -153,12 +170,14 @@ async function uploadAsset(
 async function cleanupUploadedAssets(
   supabase: SupabaseClient,
   uploadedAssets: UploadedAsset[],
-) {
+): Promise<string | null> {
   if (uploadedAssets.length === 0) {
-    return;
+    return null;
   }
 
-  await supabase.storage
+  const { error } = await supabase.storage
     .from(GALLERY_BUCKET_NAME)
     .remove(uploadedAssets.map((asset) => asset.path));
+
+  return error?.message ?? null;
 }

@@ -1,5 +1,6 @@
 export const MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;
 export const SUPPORTED_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp"] as const;
+const SUPPORTED_IMAGE_MIME_TYPE_SET = new Set<string>(SUPPORTED_IMAGE_MIME_TYPES);
 
 export type SupportedImageMimeType = (typeof SUPPORTED_IMAGE_MIME_TYPES)[number];
 
@@ -22,7 +23,7 @@ type GenerateImageAssetOptions = {
 };
 
 export function isSupportedImageType(mimeType: string): mimeType is SupportedImageMimeType {
-  return SUPPORTED_IMAGE_MIME_TYPES.includes(mimeType as SupportedImageMimeType);
+  return SUPPORTED_IMAGE_MIME_TYPE_SET.has(mimeType);
 }
 
 export function canGenerateCompressedImageAsset() {
@@ -108,6 +109,21 @@ export async function generateCompressedImageAsset(
   }
 }
 
+export async function generateCompressedImageAssets(
+  source: File,
+  optionsList: GenerateImageAssetOptions[],
+): Promise<GeneratedImageAsset[]> {
+  const bitmap = await createImageBitmap(source);
+
+  try {
+    return await Promise.all(
+      optionsList.map((options) => generateCompressedImageAssetFromBitmap(bitmap, options)),
+    );
+  } finally {
+    bitmap.close();
+  }
+}
+
 export function getFileExtension(fileName: string, fallback = "bin"): string {
   const normalized = fileName.trim();
   const extension = normalized.includes(".") ? normalized.split(".").pop() : "";
@@ -139,6 +155,35 @@ function replaceFileExtension(fileName: string, nextExtension: string): string {
   const baseName = safeName.replace(/\.[^.]+$/, "");
 
   return `${baseName || "image"}.${nextExtension}`;
+}
+
+async function generateCompressedImageAssetFromBitmap(
+  bitmap: ImageBitmap,
+  options: GenerateImageAssetOptions,
+): Promise<GeneratedImageAsset> {
+  const dimensions = fitWithinMaxLongEdge(bitmap.width, bitmap.height, options.maxLongEdge);
+  const canvas = document.createElement("canvas");
+  canvas.width = dimensions.width;
+  canvas.height = dimensions.height;
+
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error("画像変換に必要な Canvas コンテキストを取得できませんでした。");
+  }
+
+  context.drawImage(bitmap, 0, 0, dimensions.width, dimensions.height);
+
+  const blob = await canvasToBlob(canvas, "image/webp", options.quality);
+
+  return {
+    blob,
+    fileName: replaceFileExtension(options.fileName, "webp"),
+    mimeType: "image/webp",
+    sizeBytes: blob.size,
+    width: dimensions.width,
+    height: dimensions.height,
+  };
 }
 
 function canvasToBlob(

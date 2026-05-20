@@ -48,6 +48,9 @@
 - `folder_id`
 - `file_name`
 - `storage_path`
+- `thumbnail_path`
+- `display_path`
+- `original_path`
 - `mime_type`
 - `size_bytes`
 - `width`
@@ -115,7 +118,7 @@ type ViewerState = {
 - 単体保存中、一括操作中、アップロード中は多重送信を防止する。
 - mutation ロックと upload ロックは `finally` で必ず解除する。
 - 操作失敗時は toast でユーザーに分かる文言を表示する。
-- Storage 削除後に DB 更新が失敗した場合は、その状況が分かるエラー文言を表示する。
+- 画像削除は DB 行を先に削除し、その後 Storage cleanup を試みる。Storage cleanup に失敗した場合は追跡できる文言を表示する。
 - 一覧 0 件時は scope ごとに自然な空状態文言を表示する。
 - pending 中も一覧を消さず、必要なボタンだけ disabled にする。
 - sort 変更時は viewer を閉じて、並び替え前の index を引きずらないようにする。
@@ -129,7 +132,8 @@ type ViewerState = {
 - Auth は Supabase Auth を使用する。
 - `/gallery` は未ログインでアクセス不可。
 - `folders` `images` は RLS で `user_id = auth.uid()` のみ許可する。
-- Storage はオブジェクトパス先頭の `user_id` と `auth.uid()` を一致条件にする。
+- Storage は legacy `{userId}/...` と derived `thumbnails|display|originals/{userId}/...` の private object path のみを許可する。
+- `images.folder_id` は同じ `user_id` の `folders.id` だけを参照できる。
 - `NEXT_PUBLIC_SUPABASE_URL` と `NEXT_PUBLIC_SUPABASE_ANON_KEY` は `src/lib/supabase/env.ts` で直接参照する。
 
 ## UIトーン調整

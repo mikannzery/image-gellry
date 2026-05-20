@@ -84,3 +84,14 @@
 - Attempted to add `vitest`, but npm registry access was unavailable/then timed out, so the test plan was implemented with the existing TypeScript compiler and Node instead.
 - Verification passed: `npm run typecheck`, `npm run lint`, and `npm run test`.
 - DB-connected audit/backfill dry-runs were not executed because this agent session must not read `.env` or `.env.local`.
+
+## 2026-05-20 P1/P2 hardening follow-up
+- Surfaced upload rollback cleanup failures when DB insertion fails after Storage assets were already uploaded.
+- Stopped logout from clearing gallery cache and navigating to `/login` when Supabase `signOut()` returns an error.
+- Tightened gallery header sort handling by validating select values before passing them as typed sort orders.
+- Included card callback props in memo comparisons so future callback changes cannot leave stale handlers attached to memoized gallery rows/cards.
+- Reduced upload image decoding work by generating thumbnail and display variants from one decoded bitmap per source image.
+- Removed a narrow MIME type guard assertion by using a string set for supported upload types.
+- Aligned `spec.md` with current derivative image columns, DB-first deletion behavior, derived Storage path policy, and same-user folder reference rule.
+- Added the standard `npm run build` entrypoint for existing Next.js production build verification.
+- `npm run build` was attempted after build verification was allowed, but the local process failed with `spawn EPERM`.

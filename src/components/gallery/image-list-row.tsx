@@ -138,5 +138,8 @@ export const ImageListRow = memo(
     previousProps.index === nextProps.index &&
     previousProps.isSelectionMode === nextProps.isSelectionMode &&
     previousProps.selected === nextProps.selected &&
-    previousProps.pending === nextProps.pending,
+    previousProps.pending === nextProps.pending &&
+    previousProps.onOpen === nextProps.onOpen &&
+    previousProps.onToggleSelect === nextProps.onToggleSelect &&
+    previousProps.onToggleFavorite === nextProps.onToggleFavorite,
 );
