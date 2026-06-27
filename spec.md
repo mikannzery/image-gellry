@@ -164,6 +164,8 @@ type ViewerState = {
 - `ImageGridCard` と `ImageListRow` は memo 化して、未変更カードの再レンダリングを減らす。
 - `src/lib/gallery/mutations.ts` の画像更新系 mutation は共通 helper へ集約し、単体操作と一括操作で同じ update ロジックを再利用する。
 - 画像一覧 query は毎回 fresh な Supabase query builder を組み立てる。builder の再利用には依存しない。
+- `/gallery` の初期表示データは `listGalleryData` で folders と image rows を並列取得し、取得後に signed URL と folder name を view model へ合成する。
+- `listImages` は互換 API として残しつつ、内部では image rows 取得と gallery image view model 化を分ける。
 - 一覧カードの `React.memo` は stale callback を残さない前提で使い、viewer を開く処理と選択処理は ref / stable callback で現在状態を参照する。
 ## 2026-05 image storage optimization
 - New uploads create browser-side derived assets before upload.
@@ -234,6 +236,37 @@ type ViewerState = {
 - Mutations and uploads clear the client page cache before `router.refresh()`.
 - Signed URL expiry defaults to 21600 seconds and can be adjusted with `GALLERY_SIGNED_URL_EXPIRES_IN`.
 - Development builds log gallery query start/end, signed URL counts, view-only switches, and cache hits/misses.
+- 未訪問のカテゴリ／フォルダーは、リンクへの pointer enter または keyboard focus でクライアント取得を先行開始する。
+- フォルダー切り替え時は、進行中の先行取得またはクライアント取得を再利用し、認証済み Supabase client と RLS を通して一覧を更新する。
+- クライアント取得に失敗した場合は、従来の Next.js server navigation にフォールバックする。
+- 現在のページキャッシュに同じ画像の有効な signed URL がある場合は再生成せず再利用する。
+- 初期表示後は `last_used_at` 順の直近3フォルダーをバックグラウンドで先読みする。
+
+## 2026-06 selection state boundary
+- Gallery selection mode state is managed by `useGallerySelection`.
+- The hook owns selected image ids, the selected-id set, bulk-delete confirmation state, and the bulk-move target folder id.
+- `GalleryShell` keeps rendering and mutation orchestration, while calling the hook for selection enter/exit, select-all, clear, and selected-id cleanup after deletion.
+- Selection behavior, URL behavior, DB writes, and Storage cleanup behavior are unchanged.
+
+## 2026-06 viewer state boundary
+- Gallery viewer state is managed by `useGalleryViewer`.
+- The hook owns detail/fullscreen viewer state, current viewer image lookup, fullscreen open/close state, focus return ref, viewer movement, and viewer image reconciliation after deletion.
+- `GalleryShell` keeps viewer mutations and passes the hook state to `ImageDetailModal` and `FullscreenViewer`.
+- Viewer behavior, focus return behavior, selected image behavior, DB writes, and Storage cleanup behavior are unchanged.
+
+## 2026-06 image mutation boundary
+- Gallery image mutation handlers are managed by `useGalleryImageMutations`.
+- The hook owns single-image rename, move, favorite, delete, and bulk delete/move/favorite handlers.
+- `GalleryShell` keeps the shared mutation runner, pending state, folder mutations, upload handling, toast stack, cache refresh, and route navigation.
+- Image mutation behavior, DB writes, Storage cleanup behavior, viewer reconciliation, and selection cleanup behavior are unchanged.
+
+## 2026-06 folder mutation and upload boundary
+- Gallery folder mutation handlers are managed by `useGalleryFolderMutations`.
+- The hook owns folder create, rename, and delete handlers while using the shared mutation runner from `GalleryShell`.
+- Gallery upload handling is managed by `useGalleryUpload`.
+- The hook owns upload lock handling, `uploadImages` execution, upload result toast messages, and refresh-on-success.
+- `GalleryShell` keeps the shared pending state, toast stack, cache refresh function, route navigation callback, and rendered UI composition.
+- Folder mutation behavior, upload behavior, DB writes, Storage writes, cache invalidation, and route behavior are unchanged.
 
 ## 2026-05 long-term operation hardening
 - `images.folder_id` must belong to the same `user_id` as the image row.

@@ -79,6 +79,23 @@ export function getGalleryPageCacheSize() {
   return galleryPageCache.size;
 }
 
+export function getCachedGalleryImagesById(userId: string, now = Date.now()) {
+  pruneGalleryPageCache(now);
+  const imagesById = new Map<string, GalleryImageItem>();
+  const pagesByAccessTime = Array.from(galleryPageCache.entries())
+    .filter(([key]) => key.startsWith(`${userId}:`))
+    .map(([, page]) => page)
+    .sort((left, right) => left.lastAccessedAt - right.lastAccessedAt);
+
+  for (const page of pagesByAccessTime) {
+    for (const image of page.images) {
+      imagesById.set(image.id, image);
+    }
+  }
+
+  return imagesById;
+}
+
 function pruneGalleryPageCache(now: number) {
   for (const [key, cached] of galleryPageCache) {
     if (now - cached.cachedAt > GALLERY_CLIENT_CACHE_TTL_MS) {

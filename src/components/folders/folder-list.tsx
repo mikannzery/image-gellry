@@ -7,6 +7,7 @@ type FolderListProps = {
   folders: FolderRow[];
   currentFolderId?: string;
   disabled?: boolean;
+  onPreload: (folderId: string) => void;
   onOpen: (folderId: string) => void;
   onEdit: (folder: FolderRow) => void;
   onDelete: (folder: FolderRow) => void;
@@ -16,6 +17,7 @@ export function FolderList({
   folders,
   currentFolderId,
   disabled = false,
+  onPreload,
   onOpen,
   onEdit,
   onDelete,
@@ -34,6 +36,7 @@ export function FolderList({
           folder={folder}
           selected={currentFolderId === folder.id}
           disabled={disabled}
+          onPreload={onPreload}
           onOpen={onOpen}
           onEdit={onEdit}
           onDelete={onDelete}

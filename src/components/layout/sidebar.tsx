@@ -12,6 +12,7 @@ type SidebarProps = {
   currentScope: GalleryScope;
   folders: FolderRow[];
   pending?: boolean;
+  onPreloadScope: (scope: GalleryScope) => void;
   onSelectAll: () => void;
   onSelectUncategorized: () => void;
   onSelectFavorites: () => void;
@@ -27,6 +28,7 @@ export function Sidebar({
   currentScope,
   folders,
   pending = false,
+  onPreloadScope,
   onSelectAll,
   onSelectUncategorized,
   onSelectFavorites,
@@ -52,12 +54,18 @@ export function Sidebar({
       </div>
 
       <nav className="space-y-0.5 border-b border-slate-200 px-2.5 py-3" aria-label="ギャラリーカテゴリ">
-        <SidebarButton selected={currentScope.type === "all"} disabled={pending} onClick={onSelectAll}>
+        <SidebarButton
+          selected={currentScope.type === "all"}
+          disabled={pending}
+          onIntent={() => onPreloadScope({ type: "all" })}
+          onClick={onSelectAll}
+        >
           すべての画像
         </SidebarButton>
         <SidebarButton
           selected={currentScope.type === "uncategorized"}
           disabled={pending}
+          onIntent={() => onPreloadScope({ type: "uncategorized" })}
           onClick={onSelectUncategorized}
         >
           未分類
@@ -65,6 +73,7 @@ export function Sidebar({
         <SidebarButton
           selected={currentScope.type === "favorites"}
           disabled={pending}
+          onIntent={() => onPreloadScope({ type: "favorites" })}
           onClick={onSelectFavorites}
         >
           お気に入り
@@ -76,6 +85,7 @@ export function Sidebar({
           folders={folders}
           currentFolderId={currentScope.type === "folder" ? currentScope.folderId : undefined}
           disabled={pending}
+          onPreload={(folderId) => onPreloadScope({ type: "folder", folderId })}
           onOpen={onSelectFolder}
           onEdit={onEditFolder}
           onDelete={onDeleteFolder}
@@ -102,11 +112,13 @@ function SidebarButton({
   children,
   selected,
   disabled,
+  onIntent,
   onClick,
 }: {
   children: ReactNode;
   selected: boolean;
   disabled: boolean;
+  onIntent: () => void;
   onClick: () => void;
 }) {
   return (
@@ -117,6 +129,8 @@ function SidebarButton({
         selected ? "bg-slate-200 text-slate-900" : "text-slate-700 hover:bg-slate-100",
       )}
       onClick={onClick}
+      onPointerEnter={onIntent}
+      onFocus={onIntent}
       disabled={disabled}
     >
       {children}

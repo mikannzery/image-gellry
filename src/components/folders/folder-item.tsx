@@ -7,6 +7,7 @@ type FolderItemProps = {
   folder: FolderRow;
   selected: boolean;
   disabled?: boolean;
+  onPreload: (folderId: string) => void;
   onOpen: (folderId: string) => void;
   onEdit: (folder: FolderRow) => void;
   onDelete: (folder: FolderRow) => void;
@@ -16,6 +17,7 @@ export function FolderItem({
   folder,
   selected,
   disabled = false,
+  onPreload,
   onOpen,
   onEdit,
   onDelete,
@@ -31,6 +33,8 @@ export function FolderItem({
         type="button"
         className="min-w-0 flex-1 truncate text-left text-[13px] font-medium disabled:cursor-not-allowed disabled:opacity-50"
         onClick={() => onOpen(folder.id)}
+        onPointerEnter={() => onPreload(folder.id)}
+        onFocus={() => onPreload(folder.id)}
         aria-label={`${folder.name} を開く`}
         disabled={disabled}
       >

@@ -4,6 +4,7 @@ import {
   clearGalleryPageCache,
   createGalleryDataKey,
   getCachedGalleryPage,
+  getCachedGalleryImagesById,
   getGalleryPageCacheSize,
   setCachedGalleryPage,
   GALLERY_CLIENT_CACHE_MAX_ENTRIES,
@@ -63,6 +64,10 @@ const tests: TestCase[] = [
 
       assert.equal(getGalleryPageCacheSize(), GALLERY_CLIENT_CACHE_MAX_ENTRIES);
       assert.equal(getCachedGalleryPage(createGalleryDataKey("user-1", { type: "all" }, "newest", 1), 3000), null);
+
+      const newestCachedImages = getCachedGalleryImagesById("user-1", 3000);
+      assert.equal(newestCachedImages.size, GALLERY_CLIENT_CACHE_MAX_ENTRIES);
+      assert.equal(newestCachedImages.get(`image-${GALLERY_CLIENT_CACHE_MAX_ENTRIES + 3}`)?.id, `image-${GALLERY_CLIENT_CACHE_MAX_ENTRIES + 3}`);
 
       clearGalleryPageCache();
     },

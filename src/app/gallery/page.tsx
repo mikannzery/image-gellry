@@ -1,8 +1,8 @@
 import { GalleryShell } from "@/components/gallery/gallery-shell";
 import { requireUser } from "@/lib/auth/guard";
 import {
-  listFolders,
-  listImages,
+  getGallerySignedUrlExpiresIn,
+  listGalleryData,
   parseGalleryPage,
   parseGalleryScope,
   parseGallerySort,
@@ -22,8 +22,7 @@ export default async function GalleryPage({ searchParams }: GalleryPageProps) {
   const sort = parseGallerySort(resolvedSearchParams);
   const view = parseGalleryView(resolvedSearchParams);
   const page = parseGalleryPage(resolvedSearchParams);
-  const folders = await listFolders(supabase, user.id);
-  const { images, pagination } = await listImages(supabase, user.id, scope, sort, folders, page);
+  const { folders, images, pagination } = await listGalleryData(supabase, user.id, scope, sort, page);
 
   return (
     <GalleryShell
@@ -33,6 +32,7 @@ export default async function GalleryPage({ searchParams }: GalleryPageProps) {
       images={images}
       pagination={pagination}
       initialFilters={{ scope, sort, view, page: pagination.page }}
+      signedUrlExpiresIn={getGallerySignedUrlExpiresIn()}
     />
   );
 }

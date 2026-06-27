@@ -7,6 +7,17 @@ import { ImageGrid } from "@/components/gallery/image-grid";
 import { ImageList } from "@/components/gallery/image-list";
 import { GalleryPaginationControls } from "@/components/gallery/gallery-pagination-controls";
 import { SelectionToolbar } from "@/components/gallery/selection-toolbar";
+import {
+  useGalleryFolderMutations,
+  type FolderMutationRunnerOptions,
+} from "@/components/gallery/use-gallery-folder-mutations";
+import {
+  useGalleryImageMutations,
+  type ImageMutationRunnerOptions,
+} from "@/components/gallery/use-gallery-image-mutations";
+import { useGallerySelection } from "@/components/gallery/use-gallery-selection";
+import { useGalleryUpload } from "@/components/gallery/use-gallery-upload";
+import { useGalleryViewer } from "@/components/gallery/use-gallery-viewer";
 import { CreateFolderModal } from "@/components/folders/create-folder-modal";
 import { EditFolderModal } from "@/components/folders/edit-folder-modal";
 import { GalleryHeader } from "@/components/layout/gallery-header";
@@ -23,22 +34,12 @@ import {
   clearGalleryPageCache,
   clearGalleryPageCacheForUser,
   createGalleryDataKey,
+  getCachedGalleryImagesById,
   getCachedGalleryPage,
   setCachedGalleryPage,
 } from "@/lib/gallery/client-cache";
-import {
-  createFolder,
-  deleteImagesWithStorage,
-  deleteFolder,
-  moveImageToFolder,
-  moveImagesToFolder,
-  renameFolder,
-  renameImage,
-  setImagesFavorite,
-  toggleFavorite,
-  touchFolder,
-} from "@/lib/gallery/mutations";
-import { uploadImages } from "@/lib/gallery/upload";
+import { touchFolder } from "@/lib/gallery/mutations";
+import { listImages } from "@/lib/gallery/queries";
 import { createClientSupabaseClient } from "@/lib/supabase/client";
 import {
   getGalleryTitle,
@@ -49,7 +50,7 @@ import {
   type GalleryViewMode,
 } from "@/types/gallery";
 import type { FolderRow } from "@/types/folder";
-import type { GalleryImageItem, ViewerState } from "@/types/image";
+import type { GalleryImageItem } from "@/types/image";
 
 type GalleryShellProps = {
   userId: string;
@@ -58,6 +59,12 @@ type GalleryShellProps = {
   images: GalleryImageItem[];
   pagination: GalleryPagination;
   initialFilters: GalleryFilters;
+  signedUrlExpiresIn: number;
+};
+
+type GalleryPageLoadResult = {
+  images: GalleryImageItem[];
+  pagination: GalleryPagination;
 };
 
 type PendingAction =
@@ -160,14 +167,17 @@ export function GalleryShell({
   images,
   pagination,
   initialFilters,
+  signedUrlExpiresIn,
 }: GalleryShellProps) {
   const router = useRouter();
   const supabase = useMemo(() => createClientSupabaseClient(), []);
   const mutationLockRef = useRef(false);
   const uploadLockRef = useRef(false);
-  const fullscreenReturnFocusRef = useRef<HTMLElement | null>(null);
   const toastTimeoutIdsRef = useRef<number[]>([]);
   const lastTouchedFolderIdRef = useRef<string | null>(null);
+  const galleryPageLoadsRef = useRef(new Map<string, Promise<GalleryPageLoadResult>>());
+  const galleryPageCacheGenerationRef = useRef(0);
+  const navigationRequestIdRef = useRef(0);
 
   const [galleryImages, setGalleryImages] = useState<GalleryImageItem[]>(images);
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -178,16 +188,7 @@ export function GalleryShell({
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [activeFilters, setActiveFilters] = useState<GalleryFilters>(initialFilters);
   const [activePagination, setActivePagination] = useState<GalleryPagination>(pagination);
-  const [viewerState, setViewerState] = useState<ViewerState>({
-    isOpen: false,
-    currentIndex: 0,
-    images: [],
-  });
-  const [isFullscreenOpen, setIsFullscreenOpen] = useState(false);
-  const [isSelectionMode, setIsSelectionMode] = useState(false);
-  const [selectedImageIds, setSelectedImageIds] = useState<string[]>([]);
-  const [selectionMoveTargetFolderId, setSelectionMoveTargetFolderId] = useState("");
-  const [isBulkDeleteConfirmOpen, setIsBulkDeleteConfirmOpen] = useState(false);
+  const [isGalleryLoading, setIsGalleryLoading] = useState(false);
   const galleryImagesRef = useRef<GalleryImageItem[]>(images);
 
   const currentFolderId =
@@ -195,23 +196,57 @@ export function GalleryShell({
   const currentTitle = getGalleryTitle(activeFilters.scope, folders);
   const currentPage = activePagination.page;
   const totalPages = activePagination.totalPages;
-  const pending = pendingAction !== null || isUploading;
+  const pending = pendingAction !== null || isUploading || isGalleryLoading;
   const pendingMessage = isUploading
     ? "画像をアップロードしています..."
     : pendingAction
       ? pendingMessages[pendingAction]
-      : null;
+      : isGalleryLoading
+        ? "画像一覧を読み込んでいます..."
+        : null;
   const folderNameMap = useMemo(
     () => new Map(folders.map((folder) => [folder.id, folder.name])),
     [folders],
   );
-  const selectedImageIdSet = useMemo(() => new Set(selectedImageIds), [selectedImageIds]);
+  const viewer = useGalleryViewer({ imagesRef: galleryImagesRef, pending });
+  const {
+    viewerState,
+    currentViewerImage,
+    isFullscreenOpen,
+    fullscreenReturnFocusRef,
+    openViewer,
+    closeViewer,
+    moveViewer,
+    openFullscreen,
+    closeFullscreen,
+    patchViewerImages,
+    reconcileViewerAfterRemoval,
+  } = viewer;
+  const selection = useGallerySelection({ images: galleryImages, pending });
+  const {
+    isSelectionMode,
+    selectedImageIds,
+    selectedImageIdSet,
+    moveTargetFolderId: selectionMoveTargetFolderId,
+    isBulkDeleteConfirmOpen,
+    setMoveTargetFolderId: setSelectionMoveTargetFolderId,
+    setIsBulkDeleteConfirmOpen,
+    resetSelectionState,
+    exitSelectionMode,
+    toggleSelectionMode,
+    toggleSelectImage,
+    selectAllImages,
+    clearSelection,
+    removeSelectedImageIds,
+  } = selection;
   const emptyStateCopy = useMemo(
     () => getEmptyStateCopy(activeFilters.scope, folders),
     [activeFilters.scope, folders],
   );
 
   useEffect(() => {
+    navigationRequestIdRef.current += 1;
+    setIsGalleryLoading(false);
     const cacheKey = createGalleryDataKey(
       userId,
       initialFilters.scope,
@@ -224,10 +259,6 @@ export function GalleryShell({
     setActivePagination(pagination);
     setGalleryImages(images);
     galleryImagesRef.current = images;
-    setSelectedImageIds((current) => {
-      const validIds = new Set(images.map((image) => image.id));
-      return current.filter((id) => validIds.has(id));
-    });
     debugGalleryPerformance("server data applied", {
       key: cacheKey,
       count: images.length,
@@ -246,28 +277,6 @@ export function GalleryShell({
 
     window.history.replaceState(null, "", createGalleryUrl(activeFilters));
   }, [activeFilters]);
-
-  useEffect(() => {
-    if (!isSelectionMode && selectedImageIds.length > 0) {
-      setSelectedImageIds([]);
-    }
-  }, [isSelectionMode, selectedImageIds.length]);
-
-  useEffect(() => {
-    if (selectedImageIds.length === 0) {
-      setSelectionMoveTargetFolderId("");
-      setIsBulkDeleteConfirmOpen(false);
-    }
-  }, [selectedImageIds.length]);
-
-  useEffect(() => {
-    if (isSelectionMode && galleryImages.length === 0) {
-      setIsSelectionMode(false);
-      setSelectedImageIds([]);
-      setSelectionMoveTargetFolderId("");
-      setIsBulkDeleteConfirmOpen(false);
-    }
-  }, [galleryImages.length, isSelectionMode]);
 
   useEffect(() => {
     if (!currentFolderId || lastTouchedFolderIdRef.current === currentFolderId) {
@@ -301,20 +310,103 @@ export function GalleryShell({
   }, []);
 
   const refresh = useCallback(() => {
+    galleryPageCacheGenerationRef.current += 1;
+    galleryPageLoadsRef.current.clear();
     clearGalleryPageCache();
     startTransition(() => {
       router.refresh();
     });
   }, [router]);
 
-  const resetSelectionState = useCallback((nextMode = false) => {
-    setIsSelectionMode(nextMode);
-    setSelectedImageIds([]);
-    setSelectionMoveTargetFolderId("");
-    setIsBulkDeleteConfirmOpen(false);
-  }, []);
+  const loadGalleryPage = useCallback((
+    scope: GalleryScope,
+    sort: GallerySortOrder,
+    page: number,
+  ): Promise<GalleryPageLoadResult> => {
+    const cacheKey = createGalleryDataKey(userId, scope, sort, page);
+    const cachedPage = getCachedGalleryPage(cacheKey);
 
-  function navigateWith(
+    if (cachedPage) {
+      return Promise.resolve(cachedPage);
+    }
+
+    const existingLoad = galleryPageLoadsRef.current.get(cacheKey);
+
+    if (existingLoad) {
+      return existingLoad;
+    }
+
+    const cacheGeneration = galleryPageCacheGenerationRef.current;
+    const knownImagesById = getCachedGalleryImagesById(userId);
+    const loadStart = Date.now();
+    const loadPromise = listImages(
+      supabase,
+      userId,
+      scope,
+      sort,
+      folders,
+      page,
+      signedUrlExpiresIn,
+      knownImagesById,
+    )
+      .then((result) => {
+        if (galleryPageCacheGenerationRef.current === cacheGeneration) {
+          setCachedGalleryPage(cacheKey, result.images, result.pagination);
+        }
+
+        debugGalleryPerformance("client page loaded", {
+          key: cacheKey,
+          count: result.images.length,
+          elapsedMs: Date.now() - loadStart,
+        });
+        return result;
+      })
+      .finally(() => {
+        if (galleryPageLoadsRef.current.get(cacheKey) === loadPromise) {
+          galleryPageLoadsRef.current.delete(cacheKey);
+        }
+      });
+
+    galleryPageLoadsRef.current.set(cacheKey, loadPromise);
+    return loadPromise;
+  }, [folders, signedUrlExpiresIn, supabase, userId]);
+
+  const preloadGalleryScope = useCallback((scope: GalleryScope) => {
+    if (pending) {
+      return;
+    }
+
+    const isCurrentScope =
+      scope.type === activeFilters.scope.type && scope.folderId === activeFilters.scope.folderId;
+
+    if (isCurrentScope) {
+      return;
+    }
+
+    void loadGalleryPage(scope, activeFilters.sort, 1).catch((error) => {
+      debugGalleryPerformance("client page preload failed", {
+        scope: scope.type,
+        folderId: scope.folderId ?? null,
+        message: resolveErrorMessage(error, "unknown error"),
+      });
+    });
+  }, [activeFilters.scope, activeFilters.sort, loadGalleryPage, pending]);
+
+  useEffect(() => {
+    if (pending) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      folders.slice(0, 3).forEach((folder) => {
+        preloadGalleryScope({ type: "folder", folderId: folder.id });
+      });
+    }, 300);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [folders, pending, preloadGalleryScope]);
+
+  async function navigateWith(
     next: Partial<{
       scope: GalleryScope;
       sort: GallerySortOrder;
@@ -407,7 +499,41 @@ export function GalleryShell({
       sort,
       page,
     });
-    router.push(nextUrl);
+    const requestId = navigationRequestIdRef.current + 1;
+    navigationRequestIdRef.current = requestId;
+    setIsGalleryLoading(true);
+
+    try {
+      const loadedPage = await loadGalleryPage(scope, sort, page);
+
+      if (navigationRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setActiveFilters({ ...nextFilters, page: loadedPage.pagination.page });
+      setActivePagination(loadedPage.pagination);
+      setGalleryImages(loadedPage.images);
+      galleryImagesRef.current = loadedPage.images;
+      window.history.pushState(
+        null,
+        "",
+        createGalleryUrl({ ...nextFilters, page: loadedPage.pagination.page }),
+      );
+    } catch (error) {
+      if (navigationRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      debugGalleryPerformance("client page load failed, using server navigation", {
+        key: cacheKey,
+        message: resolveErrorMessage(error, "unknown error"),
+      });
+      router.push(nextUrl);
+    } finally {
+      if (navigationRequestIdRef.current === requestId) {
+        setIsGalleryLoading(false);
+      }
+    }
   }
 
   function getFolderName(folderId: string | null) {
@@ -436,50 +562,6 @@ export function GalleryShell({
       const nextImages = current.filter((image) => !idSet.has(image.id));
       galleryImagesRef.current = nextImages;
       return nextImages;
-    });
-  }, []);
-
-  const patchViewerImages = useCallback((
-    imageIds: string[],
-    updater: (image: GalleryImageItem) => GalleryImageItem,
-  ) => {
-    const idSet = new Set(imageIds);
-    setViewerState((current) => ({
-      ...current,
-      images: current.images.map((image) => (idSet.has(image.id) ? updater(image) : image)),
-    }));
-  }, []);
-
-  const reconcileViewerAfterRemoval = useCallback((imageIds: string[]) => {
-    const idSet = new Set(imageIds);
-
-    setViewerState((current) => {
-      if (!current.images.length) {
-        return current;
-      }
-
-      const currentImageId = current.images[current.currentIndex]?.id;
-      const nextImages = current.images.filter((image) => !idSet.has(image.id));
-
-      if (nextImages.length === 0) {
-        setIsFullscreenOpen(false);
-        return {
-          isOpen: false,
-          currentIndex: 0,
-          images: [],
-        };
-      }
-
-      const nextIndex =
-        currentImageId && !idSet.has(currentImageId)
-          ? nextImages.findIndex((image) => image.id === currentImageId)
-          : Math.min(current.currentIndex, nextImages.length - 1);
-
-      return {
-        isOpen: current.isOpen,
-        currentIndex: nextIndex >= 0 ? nextIndex : 0,
-        images: nextImages,
-      };
     });
   }, []);
 
@@ -513,125 +595,78 @@ export function GalleryShell({
     }
   }, [pushToast, refresh]);
 
-  async function handleCreateFolder(name: string) {
-    const success = await runMutation({
-      action: "create-folder",
-      successMessage: "フォルダーを作成しました。",
-      errorMessage: "フォルダーを作成できませんでした。",
-      task: async () => {
-        await createFolder(supabase, name);
-      },
-    });
+  const runImageMutation = useCallback(
+    (options: ImageMutationRunnerOptions) => runMutation(options),
+    [runMutation],
+  );
+  const runFolderMutation = useCallback(
+    (options: FolderMutationRunnerOptions) => runMutation(options),
+    [runMutation],
+  );
 
-    if (success) {
-      setCreateModalOpen(false);
-    }
-  }
+  const navigateToGalleryRoot = useCallback(() => {
+    router.push("/gallery");
+  }, [router]);
 
-  async function handleRenameFolder(name: string) {
-    if (!editingFolder) {
-      return;
-    }
+  const pushErrorToast = useCallback((message: string) => {
+    pushToast("error", message);
+  }, [pushToast]);
 
-    const success = await runMutation({
-      action: "rename-folder",
-      successMessage: "フォルダー名を変更しました。",
-      errorMessage: "フォルダー名を変更できませんでした。",
-      task: async () => {
-        await renameFolder(supabase, editingFolder.id, name);
-      },
-    });
+  const {
+    handleToggleFavorite,
+    handleViewerRename,
+    handleViewerMoveFolder,
+    handleViewerToggleFavorite,
+    handleViewerDelete,
+    handleBulkDelete,
+    handleBulkMove,
+    handleBulkFavorite,
+  } = useGalleryImageMutations({
+    supabase,
+    galleryImages,
+    selectedImageIds,
+    selectedImageIdSet,
+    selectionMoveTargetFolderId,
+    currentViewerImage,
+    getFolderName,
+    runMutation: runImageMutation,
+    patchGalleryImages,
+    removeGalleryImages,
+    patchViewerImages,
+    reconcileViewerAfterRemoval,
+    removeSelectedImageIds,
+    clearSelection,
+    exitSelectionMode,
+    setIsBulkDeleteConfirmOpen,
+    pushErrorToast,
+  });
 
-    if (success) {
-      setEditingFolder(null);
-    }
-  }
+  const {
+    handleCreateFolder,
+    handleRenameFolder,
+    handleDeleteFolder,
+  } = useGalleryFolderMutations({
+    supabase,
+    editingFolder,
+    folderToDelete,
+    activeScope: activeFilters.scope,
+    runMutation: runFolderMutation,
+    onDeletedCurrentFolder: navigateToGalleryRoot,
+    setCreateModalOpen,
+    setEditingFolder,
+    setFolderToDelete,
+  });
 
-  async function handleDeleteFolder() {
-    if (!folderToDelete) {
-      return;
-    }
-
-    const deletingCurrentFolder =
-      activeFilters.scope.type === "folder" && activeFilters.scope.folderId === folderToDelete.id;
-
-    const success = await runMutation({
-      action: "delete-folder",
-      successMessage: "フォルダーを削除しました。中の画像は未分類へ移動されます。",
-      errorMessage: "フォルダーを削除できませんでした。",
-      task: async () => {
-        await deleteFolder(supabase, folderToDelete.id);
-
-        if (deletingCurrentFolder) {
-          router.push("/gallery");
-        }
-      },
-    });
-
-    if (success) {
-      setFolderToDelete(null);
-    }
-  }
-
-  const handleToggleFavorite = useCallback(async (imageId: string, nextValue: boolean) => {
-    await runMutation({
-      action: "favorite-image",
-      successMessage: nextValue ? "お気に入りに追加しました。" : "お気に入りを解除しました。",
-      errorMessage: "お気に入り状態を更新できませんでした。",
-      task: async () => {
-        await toggleFavorite(supabase, imageId, nextValue);
-        patchGalleryImages([imageId], (image) => ({ ...image, is_favorite: nextValue }));
-        patchViewerImages([imageId], (image) => ({ ...image, is_favorite: nextValue }));
-      },
-    });
-  }, [patchGalleryImages, patchViewerImages, runMutation, supabase]);
-
-  async function handleUploadFiles(files: File[]) {
-    if (uploadLockRef.current || mutationLockRef.current) {
-      return;
-    }
-
-    try {
-      uploadLockRef.current = true;
-      setIsUploading(true);
-
-      try {
-        const results = await uploadImages(supabase, {
-          userId,
-          scope: activeFilters.scope,
-          files,
-        });
-
-        const successCount = results.filter((item) => item.status === "success").length;
-        const errors = results.filter((item) => item.status === "error");
-
-        if (successCount > 0) {
-          pushToast(
-            "success",
-            successCount === 1
-              ? "画像をアップロードしました。"
-              : `${successCount} 件の画像をアップロードしました。`,
-          );
-          refresh();
-        }
-
-        if (errors.length > 0) {
-          const firstError = errors[0]?.error ?? "アップロードに失敗しました。";
-          pushToast(
-            "error",
-            errors.length === 1
-              ? firstError
-              : `${errors.length} 件のアップロードに失敗しました。最初のエラー: ${firstError}`,
-          );
-        }
-      } catch (error) {
-        pushToast("error", resolveErrorMessage(error, "アップロードに失敗しました。"));
-      }
-    } finally {
-      uploadLockRef.current = false;
-      setIsUploading(false);
-    }
-  }
+  const { handleUploadFiles } = useGalleryUpload({
+    supabase,
+    userId,
+    scope: activeFilters.scope,
+    uploadLockRef,
+    mutationLockRef,
+    setIsUploading,
+    refresh,
+    pushToast,
+  });
 
   async function handleLogout() {
     if (pending) {
@@ -650,290 +685,6 @@ export function GalleryShell({
     router.refresh();
   }
 
-  const openViewer = useCallback((index: number) => {
-    if (pending) {
-      return;
-    }
-
-    setViewerState({
-      isOpen: true,
-      currentIndex: index,
-      images: galleryImagesRef.current,
-    });
-    setIsFullscreenOpen(false);
-  }, [pending]);
-
-  const closeViewer = useCallback(() => {
-    setViewerState((current) => ({
-      ...current,
-      isOpen: false,
-    }));
-    setIsFullscreenOpen(false);
-  }, []);
-
-  function moveViewer(direction: -1 | 1) {
-    setViewerState((current) => {
-      if (!current.isOpen) {
-        return current;
-      }
-
-      const nextIndex = current.currentIndex + direction;
-
-      if (nextIndex < 0 || nextIndex >= current.images.length) {
-        return current;
-      }
-
-      return {
-        ...current,
-        currentIndex: nextIndex,
-      };
-    });
-  }
-
-  function enterSelectionMode() {
-    if (pending) {
-      return;
-    }
-
-    resetSelectionState(true);
-  }
-
-  function exitSelectionMode() {
-    resetSelectionState(false);
-  }
-
-  function toggleSelectionMode() {
-    if (isSelectionMode) {
-      exitSelectionMode();
-      return;
-    }
-
-    enterSelectionMode();
-  }
-
-  const toggleSelectImage = useCallback((imageId: string) => {
-    if (pending) {
-      return;
-    }
-
-    setSelectedImageIds((current) =>
-      current.includes(imageId)
-        ? current.filter((id) => id !== imageId)
-        : [...current, imageId],
-    );
-  }, [pending]);
-
-  const selectAllImages = useCallback(() => {
-    if (pending) {
-      return;
-    }
-
-    setSelectedImageIds(galleryImagesRef.current.map((image) => image.id));
-  }, [pending]);
-
-  const clearSelection = useCallback(() => {
-    setSelectedImageIds([]);
-  }, []);
-
-  async function handleViewerRename(fileName: string) {
-    const currentImage = viewerState.images[viewerState.currentIndex];
-
-    if (!currentImage) {
-      return;
-    }
-
-    await runMutation({
-      action: "rename-image",
-      successMessage: "画像名を変更しました。",
-      errorMessage: "画像名を変更できませんでした。",
-      task: async () => {
-        const nextFileName = await renameImage(supabase, currentImage.id, fileName);
-
-        patchGalleryImages([currentImage.id], (image) => ({ ...image, file_name: nextFileName }));
-        patchViewerImages([currentImage.id], (image) => ({ ...image, file_name: nextFileName }));
-      },
-    });
-  }
-
-  async function handleViewerMoveFolder(folderId: string | null) {
-    const currentImage = viewerState.images[viewerState.currentIndex];
-
-    if (!currentImage) {
-      return;
-    }
-
-    await runMutation({
-      action: "move-image",
-      successMessage: "フォルダー移動を保存しました。",
-      errorMessage: "フォルダー移動に失敗しました。",
-      task: async () => {
-        await moveImageToFolder(supabase, currentImage.id, folderId);
-
-        if (folderId) {
-          await touchFolder(supabase, folderId);
-        }
-
-        const folderName = getFolderName(folderId);
-
-        patchGalleryImages([currentImage.id], (image) => ({
-          ...image,
-          folder_id: folderId,
-          folder_name: folderName,
-        }));
-        patchViewerImages([currentImage.id], (image) => ({
-          ...image,
-          folder_id: folderId,
-          folder_name: folderName,
-        }));
-      },
-    });
-  }
-
-  async function handleViewerToggleFavorite(nextValue: boolean) {
-    const currentImage = viewerState.images[viewerState.currentIndex];
-
-    if (!currentImage) {
-      return;
-    }
-
-    await runMutation({
-      action: "favorite-image",
-      successMessage: nextValue ? "お気に入りに追加しました。" : "お気に入りを解除しました。",
-      errorMessage: "お気に入り状態を更新できませんでした。",
-      task: async () => {
-        await toggleFavorite(supabase, currentImage.id, nextValue);
-        patchGalleryImages([currentImage.id], (image) => ({ ...image, is_favorite: nextValue }));
-        patchViewerImages([currentImage.id], (image) => ({ ...image, is_favorite: nextValue }));
-      },
-    });
-  }
-
-  async function handleViewerDelete() {
-    const currentImage = viewerState.images[viewerState.currentIndex];
-
-    if (!currentImage) {
-      return;
-    }
-
-    await runMutation({
-      action: "delete-image",
-      successMessage: "画像を削除しました。",
-      errorMessage: "画像を削除できませんでした。",
-      task: async () => {
-        const result = await deleteImagesWithStorage(supabase, [currentImage]);
-        removeGalleryImages([currentImage.id]);
-        reconcileViewerAfterRemoval([currentImage.id]);
-        setSelectedImageIds((current) => current.filter((id) => id !== currentImage.id));
-
-        if (result.storageErrorMessage) {
-          pushToast(
-            "error",
-            `データベースからは削除されましたが、Storage の削除に失敗しました。${result.storageErrorMessage}`,
-          );
-        }
-      },
-    });
-  }
-
-  async function handleBulkDelete() {
-    if (selectedImageIds.length === 0) {
-      return;
-    }
-
-    const targetImages = galleryImages.filter((image) => selectedImageIdSet.has(image.id));
-    const targetIds = targetImages.map((image) => image.id);
-
-    if (targetIds.length === 0) {
-      return;
-    }
-
-    await runMutation({
-      action: "bulk-delete",
-      successMessage: "選択した画像を削除しました。",
-      errorMessage: "一括削除に失敗しました。",
-      task: async () => {
-        const result = await deleteImagesWithStorage(supabase, targetImages);
-        removeGalleryImages(targetIds);
-        reconcileViewerAfterRemoval(targetIds);
-        clearSelection();
-        setIsBulkDeleteConfirmOpen(false);
-
-        if (galleryImages.length - targetIds.length <= 0) {
-          setIsSelectionMode(false);
-        }
-
-        if (result.storageErrorMessage) {
-          pushToast(
-            "error",
-            `データベースからは削除されましたが、Storage の削除に失敗しました。${result.storageErrorMessage}`,
-          );
-        }
-      },
-    });
-  }
-
-  async function handleBulkMove() {
-    if (selectedImageIds.length === 0) {
-      return;
-    }
-
-    const nextFolderId = selectionMoveTargetFolderId || null;
-
-    await runMutation({
-      action: "bulk-move",
-      successMessage: "選択した画像を移動しました。",
-      errorMessage: "一括フォルダー移動に失敗しました。",
-      task: async () => {
-        await moveImagesToFolder(supabase, selectedImageIds, nextFolderId);
-
-        if (nextFolderId) {
-          await touchFolder(supabase, nextFolderId);
-        }
-
-        const folderName = getFolderName(nextFolderId);
-
-        patchGalleryImages(selectedImageIds, (image) => ({
-          ...image,
-          folder_id: nextFolderId,
-          folder_name: folderName,
-        }));
-        patchViewerImages(selectedImageIds, (image) => ({
-          ...image,
-          folder_id: nextFolderId,
-          folder_name: folderName,
-        }));
-        clearSelection();
-      },
-    });
-  }
-
-  async function handleBulkFavorite(nextValue: boolean) {
-    if (selectedImageIds.length === 0) {
-      return;
-    }
-
-    await runMutation({
-      action: "bulk-favorite",
-      successMessage: nextValue
-        ? "選択した画像をお気に入りに追加しました。"
-        : "選択した画像のお気に入りを解除しました。",
-      errorMessage: "一括お気に入り更新に失敗しました。",
-      task: async () => {
-        await setImagesFavorite(supabase, selectedImageIds, nextValue);
-
-        patchGalleryImages(selectedImageIds, (image) => ({
-          ...image,
-          is_favorite: nextValue,
-        }));
-        patchViewerImages(selectedImageIds, (image) => ({
-          ...image,
-          is_favorite: nextValue,
-        }));
-        clearSelection();
-      },
-    });
-  }
-
   return (
     <>
       <ToastStack items={toasts} />
@@ -946,11 +697,7 @@ export function GalleryShell({
         onClose={closeViewer}
         onPrevious={() => moveViewer(-1)}
         onNext={() => moveViewer(1)}
-        onOpenFullscreen={() => {
-          fullscreenReturnFocusRef.current =
-            document.activeElement instanceof HTMLElement ? document.activeElement : null;
-          setIsFullscreenOpen(true);
-        }}
+        onOpenFullscreen={openFullscreen}
         onRename={handleViewerRename}
         onMoveFolder={handleViewerMoveFolder}
         onDelete={handleViewerDelete}
@@ -961,7 +708,7 @@ export function GalleryShell({
         open={viewerState.isOpen && isFullscreenOpen}
         viewerState={viewerState}
         returnFocusRef={fullscreenReturnFocusRef}
-        onClose={() => setIsFullscreenOpen(false)}
+        onClose={closeFullscreen}
         onPrevious={() => moveViewer(-1)}
         onNext={() => moveViewer(1)}
       />
@@ -995,7 +742,7 @@ export function GalleryShell({
         open={isBulkDeleteConfirmOpen}
         title="選択した画像を削除しますか？"
         description="元に戻せません。Storage とデータベースの両方からまとめて削除します。"
-        confirmLabel="一括削除する"
+        confirmLabel="削除する"
         intent="danger"
         pending={pending}
         onConfirm={handleBulkDelete}
@@ -1009,6 +756,7 @@ export function GalleryShell({
             currentScope={activeFilters.scope}
             folders={folders}
             pending={pending}
+            onPreloadScope={preloadGalleryScope}
             onSelectAll={() => navigateWith({ scope: { type: "all" } })}
             onSelectUncategorized={() => navigateWith({ scope: { type: "uncategorized" } })}
             onSelectFavorites={() => navigateWith({ scope: { type: "favorites" } })}

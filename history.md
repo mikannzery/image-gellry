@@ -95,3 +95,41 @@
 - Aligned `spec.md` with current derivative image columns, DB-first deletion behavior, derived Storage path policy, and same-user folder reference rule.
 - Added the standard `npm run build` entrypoint for existing Next.js production build verification.
 - `npm run build` was attempted after build verification was allowed, but the local process failed with `spawn EPERM`.
+
+## 2026-06-08 staged P2 query hardening
+- Split gallery image listing into image row retrieval and gallery image view-model construction while preserving the existing `listImages` API.
+- Added `listGalleryData` so `/gallery` can fetch folders and image rows concurrently before combining folder names and signed URLs.
+- Kept DB schema, public component props, URL parameters, pagination behavior, and Storage path behavior unchanged.
+- Verification passed: `npm run lint`, `npx tsc --noEmit --incremental false`, `npm run test`, `git diff --check`, and sandbox-escalated `npm run build`.
+
+## 2026-06-08 staged P2 selection boundary
+- Added `useGallerySelection` to own selection mode, selected ids, selected-id set, bulk-delete confirmation state, and bulk-move target state.
+- Updated `GalleryShell` to use the selection hook while preserving existing selection UI, bulk actions, URL behavior, and mutation behavior.
+- Left viewer state and mutation handlers in `GalleryShell` for the next staged responsibility split.
+- Verification passed: `npm run lint`, `npx tsc --noEmit --incremental false`, `npm run test`, `git diff --check`, and sandbox-escalated `npm run build`.
+
+## 2026-06-08 staged P2 viewer boundary
+- Added `useGalleryViewer` to own detail/fullscreen viewer state, current viewer image lookup, focus return ref, viewer movement, and viewer reconciliation after deletion.
+- Updated `GalleryShell` to call the viewer hook while preserving viewer UI props, viewer mutations, deletion behavior, focus return behavior, and fullscreen behavior.
+- Left folder/image mutation orchestration in `GalleryShell` for the next staged responsibility split.
+- Verification passed: `npm run lint`, `npx tsc --noEmit --incremental false`, `npm run test`, `git diff --check`, and sandbox-escalated `npm run build`.
+
+## 2026-06-08 staged P2 image mutation boundary
+- Added `useGalleryImageMutations` to own single-image rename/move/favorite/delete and bulk delete/move/favorite handlers.
+- Updated `GalleryShell` to keep the shared mutation runner, folder mutations, upload handling, toast stack, cache refresh, and route navigation while delegating image handlers to the hook.
+- Preserved DB writes, Storage cleanup flow, viewer reconciliation, selection cleanup, URL behavior, and component props.
+- Restored malformed `GalleryShell` UI strings to readable Japanese after a local text rewrite exposed legacy mojibake as parse errors.
+- Verification passed: `npm run lint`, `npx tsc --noEmit --incremental false`, `npm run test`, `git diff --check`, and sandbox-escalated `npm run build`.
+
+## 2026-06-23 staged P2 folder mutation and upload boundary
+- Added `useGalleryFolderMutations` to own folder create/rename/delete handlers while continuing to use the existing shared mutation runner.
+- Added `useGalleryUpload` to own upload lock handling, `uploadImages` execution, upload result toast messages, and refresh-on-success.
+- Updated `GalleryShell` to keep pending state, toast stack, cache refresh, route navigation, and rendered UI composition while delegating folder and upload handlers to hooks.
+- Preserved folder DB writes, upload Storage/DB writes, cache invalidation, route behavior, modal close behavior, and component props.
+
+## 2026-06-27 gallery folder switching performance
+- Added intent-based preloading for sidebar categories and folders on pointer enter and keyboard focus.
+- Changed uncached gallery switches to load directly through the authenticated browser Supabase client, reusing in-flight preloads and the existing three-minute page cache.
+- Preserved RLS enforcement, signed URL expiry configuration, and server navigation as the fallback when a client-side load fails.
+- Reused signed URLs already held by the bounded page cache instead of regenerating them for the same image on every folder switch.
+- Added bounded background preloading for the three most recently used folders.
